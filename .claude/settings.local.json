@@ -1,0 +1,12 @@
+{
+  "enabledMcpjsonServers": [
+    "neo4j",
+    "memory",
+    "context7",
+    "tree-sitter",
+    "sequential-thinking",
+    "chrome-devtools",
+    "testiny",
+    "better-auth"
+  ]
+}

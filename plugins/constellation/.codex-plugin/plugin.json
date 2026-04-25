@@ -1,0 +1,33 @@
+{
+	"name": "constellation",
+	"version": "1.0.0",
+	"description": "Constellation code intelligence.",
+	"author": {
+		"name": "ShiftinBits Inc",
+		"email": "hello@shiftinbits.com",
+		"url": "https://shiftinbits.com"
+	},
+	"homepage": "https://constellationdev.io",
+	"repository": "https://github.com/ShiftinBits/constellation-codex",
+	"license": "AGPL-3.0",
+	"keywords": ["code-intelligence", "dependency-analysis", "impact-analysis", "mcp", "constellation", "codex"],
+	"skills": "./skills/",
+	"hooks": "./hooks/hooks.json",
+	"mcpServers": "./.mcp.json",
+	"interface": {
+		"displayName": "Constellation",
+		"shortDescription": "Upgrade Codex from text search to code understanding.",
+		"longDescription": "Use Constellation's privacy-first code graph in Codex for architecture, dependency, impact, and dead-code analysis.",
+		"developerName": "ShiftinBits Inc.",
+		"category": "Coding",
+		"capabilities": ["Read", "MCP", "Code Navigation"],
+		"websiteURL": "https://constellationdev.io",
+		"privacyPolicyURL": "https://constellationdev.io/privacy",
+		"termsOfServiceURL": "https://constellationdev.io/tos",
+		"defaultPrompt": ["Explain codebase.", "Analyze impact.", "Check deps."],
+		"brandColor": "#1B1B23",
+		"composerIcon": "./assets/logo.svg",
+		"logo": "./assets/logo.svg",
+		"screenshots": []
+	}
+}

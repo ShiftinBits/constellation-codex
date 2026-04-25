@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"console.log('Use mcp__constellation__code_intel first for structure: definitions, callers, dependencies, impact, architecture, and dead code. Use shell search for literals or fallback.')\"",
+            "statusMessage": "Loading Constellation guidance",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"console.log(JSON.stringify({systemMessage:'For structural code search, prefer mcp__constellation__code_intel. Use Bash for literals, configs, logs, or fallback.'}))\"",
+            "statusMessage": "Checking Constellation guidance",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
