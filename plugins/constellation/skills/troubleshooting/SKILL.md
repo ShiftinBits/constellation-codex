@@ -61,15 +61,7 @@ Check error.code:
      }
    }
    ```
-
-4. **Validate plugin JSON** if the plugin won't load:
-
-   ```bash
-   python3 -m json.tool .codex-plugin/plugin.json >/dev/null
-   python3 -m json.tool .mcp.json >/dev/null
-   python3 -m json.tool hooks/hooks.json >/dev/null
-   ```
-
+   
 ## Authentication Issues (AUTH_ERROR)
 
 **Symptom:** "Authentication failed" or "Invalid API key"
