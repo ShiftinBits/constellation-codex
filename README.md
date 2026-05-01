@@ -8,8 +8,8 @@ While Constellation's MCP server provides raw code intelligence capabilities, th
 |---------|---------|
 | **Constellation Skills** | `$constellation:` workflows for common code intelligence tasks |
 | **Troubleshooting Skill** | Targeted diagnostics for auth, indexing, API, and MCP failures |
-| **Reference Agents** | Specialist prompts for exploration, impact, and dependency review |
-| **Safety Hooks** | Reminders to check impact before modifying code |
+| **Impact Analysis Skill** | Pre-change blast-radius guidance before refactors, renames, or deletions |
+| **Safety Hooks** | Reminders to prefer `code_intel` over text search for structural queries |
 
 ## Features
 
@@ -26,23 +26,7 @@ Reusable `$constellation:` skills for structural analysis and plugin diagnostics
 | `$constellation:unused` | Discover orphaned exports and dead code |
 | `$constellation:architecture` | Get a high-level overview of your codebase structure |
 | `$constellation:troubleshooting` | Diagnose Constellation errors, indexing problems, auth issues, and MCP failures |
-
-### Agents
-
-Specialized prompts for autonomous analysis:
-
-| Agent | Purpose |
-|-------|---------|
-| **source-scout** | Explores and navigates codebase, discovers symbols and architectural patterns |
-| **impact-investigator** | Proactively assesses risk before refactoring, renaming, or deleting code |
-| **dependency-detective** | Detects circular dependencies and unhealthy coupling patterns |
-
-**Example Trigger:**
-```
-You: "Rename AuthService to AuthenticationService"
-Codex: "Before renaming, let me analyze the potential impact..."
-[Loads impact-investigator workflow]
-```
+| `impact-analysis` | Keyword-triggered guidance before refactoring, renaming, deleting, or moving code |
 
 ### Hooks
 
@@ -50,8 +34,8 @@ Event hooks enable intelligent, transparent assistance:
 
 | Hook | Event | Behavior |
 |------|-------|----------|
-| **Session Start** | `SessionStart` | Establishes Constellation as the primary code intelligence source |
-| **Pre Tool Use** | `PreToolUse` | Matches `Bash` to remind Codex to prefer Constellation before shell text search for structural code queries |
+| **Session Start** | `SessionStart` | Establishes `code_intel` as the primary tool for code search and navigation |
+| **Post Tool Use** | `PostToolUse` | Matches `Bash` and, when the command contains `grep`/`rg`/`glob`/`awk`/`findstr`, reminds Codex to prefer `code_intel` for structural queries |
 
 Hooks require Codex hooks to be enabled with `codex_hooks`.
 

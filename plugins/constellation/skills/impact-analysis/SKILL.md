@@ -1,5 +1,5 @@
 ---
-name: impact
+name: impact-analysis
 description: Use when invoking $constellation:impact.
 ---
 

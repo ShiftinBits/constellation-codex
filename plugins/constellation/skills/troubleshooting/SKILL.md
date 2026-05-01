@@ -5,126 +5,68 @@ description: Use when invoking $constellation:troubleshooting, when the user rep
 
 # Constellation Troubleshooting
 
-Diagnostic procedures for Constellation plugin issues. Continue the user's task with local search/read fallbacks when Constellation is unavailable.
+Diagnose Constellation plugin failures. If unavailable, continue with local search/read and clearly note degraded mode.
 
-## Quick Diagnosis Flowchart
+## Triage Order
 
-```
-Issue Reported
-     |
-     v
-Can mcp__constellation__code_intel be called?
-     |                    |
-    YES                   NO
-     |                    |
-     v                    v
-  API Error          MCP Server Issue
- (has error.code)   (see MCP Diagnosis)
-     |
-     v
-Check error.code:
-- AUTH_ERROR             --> Authentication section
-- PROJECT_NOT_INDEXED    --> Indexing section
-- SYMBOL_NOT_FOUND       --> Query Issues section
-- API_UNREACHABLE        --> Connectivity section
-```
+1. If `mcp__constellation__code_intel` cannot be called, treat as MCP startup/config issue.
+2. If a response includes `error.code`, branch by code:
+   `AUTH_ERROR`, `PROJECT_NOT_INDEXED`, `SYMBOL_NOT_FOUND`, `FILE_NOT_FOUND`, `API_UNREACHABLE`.
+3. If status is unclear, run `$constellation:status` then `$constellation:diagnose`.
 
 ## MCP Server Issues
 
-**Symptom:** MCP tool calls fail entirely, "Failed to connect", or `mcp__constellation__code_intel` is missing.
+Symptom: connection failures or missing `mcp__constellation__code_intel`.
 
-**Cause:** The MCP server isn't starting or is crashing.
-
-**Quick Fixes:**
-
-1. **Restart Codex** — MCP connections initialize at startup.
-
-2. **Verify the MCP binary works:**
-
-   ```bash
-   npx -y @constellationdev/mcp@latest --version
-   ```
-
-3. **Verify MCP configuration** — the server is built into the constellation plugin, but the config should match:
-
-   ```json
-   {
-     "mcpServers": {
-       "constellation": {
-         "type": "stdio",
-         "command": "npx",
-         "args": ["-y", "@constellationdev/mcp@latest"],
-         "env": {
-           "CONSTELLATION_ACCESS_KEY": "${CONSTELLATION_ACCESS_KEY}"
-         }
-       }
-     }
-   }
-   ```
+1. Restart Codex.
+2. Verify MCP binary:
+```bash
+npx -y @constellationdev/mcp@latest --version
+```
+3. Verify MCP config points to `npx -y @constellationdev/mcp@latest` and passes `CONSTELLATION_ACCESS_KEY`.
    
 ## Authentication Issues (AUTH_ERROR)
 
-**Symptom:** "Authentication failed" or "Invalid API key"
+Symptom: invalid credentials.
 
-**Quick Fixes:**
-
-1. **Configure credentials:**
-
-   ```bash
-   npx @constellationdev/cli auth
-   ```
-
-2. **Check if access key is properly set:**
-
-   On `AUTH_ERROR` failures the MCP server provides details in the `error.guidance[0]` value of the response object, indicating the current state of the `CONSTELLATION_ACCESS_KEY` environment variable.
-
-3. **If key is expired:** Regenerate in the Constellation web UI under Settings > API Keys.
+1. Configure credentials:
+```bash
+npx @constellationdev/cli auth
+```
+2. Read `error.guidance[0]` for key-state details.
+3. Regenerate expired/revoked keys in Constellation UI.
 
 ## Indexing Issues (PROJECT_NOT_INDEXED)
 
-**Symptom:** "Project not indexed" or empty results.
+Symptom: index missing/stale.
 
-**Quick Fixes:**
-
-1. **Index the project:**
-
-   ```bash
-   cd /path/to/your/project
-   constellation index --full
-   ```
-
-2. **Force reindex if stale:**
-
-   ```bash
-   constellation index --full --force
-   ```
+1. Index:
+```bash
+constellation index --full
+```
+2. Force reindex:
+```bash
+constellation index --full --force
+```
 
 ## Connectivity Issues (API_UNREACHABLE)
 
-**Symptom:** Timeout or connection refused.
+Symptom: timeout or refusal.
 
-**Quick Fixes:**
-
-1. **Check network connectivity.**
-2. **Check Constellation status** at https://status.constellationdev.io/
-3. **Check the API URL** in the project's `constellation.json`.
+1. Check local network/DNS.
+2. Check status page: `https://status.constellationdev.io/`
+3. Verify API URL in `constellation.json`.
 
 ## Query Issues (SYMBOL_NOT_FOUND, FILE_NOT_FOUND)
 
-These are typically **not errors** — the item simply wasn't found in the index.
+Usually not fatal; item is absent from index/query scope.
 
-**Troubleshooting:**
+1. Broaden search terms.
+2. Check spelling/case/path.
+3. Confirm language/extension is indexed.
+4. Reindex if files were added recently.
 
-1. Try partial/broader search terms.
-2. Check spelling and case sensitivity.
-3. Verify the file extension is in configured languages.
-4. Re-index if the file was recently added.
-
-## Diagnostic Order
-
-1. Try `$constellation:status` for a quick connectivity/auth check.
-2. If status is unclear, run `$constellation:diagnose` for a full health report (MCP, auth, indexing).
-3. For code questions when Constellation is unavailable, fall back to local text search and file reads — note the degraded mode to the user.
+When blocked, continue task with local tools and state degraded mode.
 
 ## Error Code Quick Reference
 
