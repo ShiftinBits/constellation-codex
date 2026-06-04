@@ -3,24 +3,24 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|resume|clear",
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
-            "command": "node plugins/constellation/hooks/inject.js SessionStart",
+            "command": "node ${PLUGIN_ROOT}/hooks/inject.js SessionStart",
             "statusMessage": "Loading Constellation guidance...",
             "timeout": 3
           }
         ]
       }
     ],
-    "PostToolUse": [
+    "PreToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "node plugins/constellation/hooks/bash.js",
+            "command": "node ${PLUGIN_ROOT}/hooks/bash.js",
             "statusMessage": "Consulting Constellation...",
             "timeout": 2
           }

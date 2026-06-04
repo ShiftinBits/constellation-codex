@@ -1,11 +1,9 @@
 'use strict';
 
-if (!process.env.CONSTELLATION_ACCESS_KEY?.startsWith('ak:')) process.exit(0);
-
 const SESSION_START_REMINDER =
-  'You have access to the code_intel source code intelligence tool, this should be your preferred tool for searching or navigating the code base (finding definitions or references, impact analysis, architecture details, etc.). Other search tools (e.g. grep, glob, awk, rg) should be used for literal text search or as a fallback.';
+  'Use code_intel for structural code questions: definitions, references, callers, dependencies, impact, architecture, and orphaned code. Use local file/text tools for exact strings, config values, logs, docs, file contents, or unindexed projects.';
 const TOOL_USE_REMINDER =
-  'Use the code_intel tool before other tools for searching or navigating the codebase. Other search tools (e.g. grep, glob, awk, rg) should be used for literal text search or as a fallback.';
+  'This looks like text search. If you are looking for symbols, references, callers, dependencies, or impact, use code_intel. If you need exact strings, config values, logs, or raw file contents, local search is appropriate.';
 
 const ADDITIONAL_CONTEXT = {
   SessionStart: SESSION_START_REMINDER,
@@ -14,7 +12,8 @@ const ADDITIONAL_CONTEXT = {
 };
 
 function isConstellationEnabled() {
-  return process.env.CONSTELLATION_ACCESS_KEY?.startsWith('ak:');
+  const accessKey = process.env.CONSTELLATION_ACCESS_KEY || '';
+  return accessKey.startsWith('ak:');
 }
 
 function buildHookOutput(hookEventName) {
