@@ -35,9 +35,9 @@ Event hooks enable intelligent, transparent assistance:
 | Hook | Event | Behavior |
 |------|-------|----------|
 | **Session Start** | `SessionStart` | Establishes `code_intel` as the primary tool for code search and navigation |
-| **Post Tool Use** | `PostToolUse` | Matches `Bash` and, when the command contains `grep`/`rg`/`glob`/`awk`/`findstr`, reminds Codex to prefer `code_intel` for structural queries |
+| **Pre Tool Use** | `PreToolUse` | Matches `Bash` and, when the command contains `grep`/`rg`/`glob`/`awk`/`findstr`, reminds Codex to prefer `code_intel` for structural queries |
 
-Hooks require Codex hooks to be enabled with `codex_hooks`.
+Hooks require Codex hooks to be enabled with `[features].hooks = true`. The older `codex_hooks` alias is deprecated.
 
 ## Installation
 
@@ -54,7 +54,7 @@ Hooks require Codex hooks to be enabled with `codex_hooks`.
 codex plugin marketplace add ShiftinBits/constellation-codex
 
 # Install the Constellation Codex plugin
-codex plugin install constellation@constellation-plugins
+codex plugin add constellation@constellation-plugins
 ```
 
 ## Usage Examples

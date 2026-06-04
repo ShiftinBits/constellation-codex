@@ -1,13 +1,11 @@
 'use strict';
 
-if (!process.env.CONSTELLATION_ACCESS_KEY?.startsWith('ak:')) process.exit(0);
-
 const readline = require('readline');
 const { ADDITIONAL_CONTEXT, isConstellationEnabled } = require('./inject');
 
 const TRIGGER_REGEX = /\b(?:grep|rg|glob|awk|findstr)\b/i;
 
-async function main() {
+async function run() {
   if (!isConstellationEnabled()) {
     return;
   }
@@ -35,11 +33,17 @@ async function main() {
   process.stdout.write(
     JSON.stringify({
       hookSpecificOutput: {
-        hookEventName: 'PostToolUse',
-        additionalContext: ADDITIONAL_CONTEXT.PostToolUse,
+        hookEventName: 'PreToolUse',
+        additionalContext: ADDITIONAL_CONTEXT.PreToolUse,
       },
     }),
   );
 }
 
-main();
+if (require.main === module) {
+  run();
+}
+
+module.exports = {
+  run,
+};
