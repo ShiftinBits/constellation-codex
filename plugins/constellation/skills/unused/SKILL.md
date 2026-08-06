@@ -15,4 +15,4 @@ const params = kindFilter ? { filterByKind: [kindFilter] } : {};
 return await api.findOrphanedCode(params);
 ```
 
-If orphans are found, summarize total count, group by file, and list symbol names, kinds, and line numbers. Remind the user to confirm dynamic entry points before deletion. If none are found, say so. If the API returns an error, explain it and include any guidance.
+If orphans are found, summarize total count, group by file, and list symbol names, kinds, and orphan reasons (each result includes reason and a confidence score; lineEnd is present when known). Remind the user to confirm dynamic entry points before deletion. If none are found, say so. If the API returns an error, explain it and include any guidance.

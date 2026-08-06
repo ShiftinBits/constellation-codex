@@ -18,4 +18,4 @@ return await api.impactAnalysis({
 });
 ```
 
-Report symbol, risk level/score, affected files and symbols, public API status, direct dependents, test coverage, and recommendations. Emphasize caution for high or critical risk. If the API returns an error, explain it and include any guidance.
+Report symbol, risk level (`data.breakingChangeRisk.riskLevel`), affected files (`data.summary.impactedFileCount`), export status (`data.symbol.isExported`), direct dependents, test exposure (`data.summary.testFileCount` vs `productionFileCount`), and recommendations (`data.breakingChangeRisk.recommendations`). Emphasize caution for high or critical risk. If the API returns an error, explain it and include any guidance.

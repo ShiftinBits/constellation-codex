@@ -13,10 +13,10 @@ return await api.getArchitectureOverview({ includeMetrics: true, includeModuleGr
 
 Report, concisely:
 
-1. Project name, total files, total symbols, languages.
-2. Language distribution from `result.data.metrics.byLanguage`.
-3. Top symbol kinds from `result.data.metrics.byKind`.
-4. Key directories from `result.data.structure`.
+1. Primary language and frameworks from `result.data.metadata`, total files (`result.data.metadata.totalFiles`), total symbols (`result.data.structure.symbols.total`).
+2. Language distribution from `result.data.metadata.languages`.
+3. Top symbol kinds from `result.data.structure.symbols.byKind`.
+4. Dependency hotspots from `result.data.dependencies.internal.mostConnectedFiles` and top packages from `result.data.dependencies.external.topPackages`.
 5. Optional observations about code shape, dominant modules, and language mix.
 
 If the tool fails, explain the error and suggest `$constellation:diagnose`.

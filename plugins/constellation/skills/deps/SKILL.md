@@ -13,7 +13,7 @@ For normal dependency analysis:
 const filePath = "<file path>";
 const [dependencies, circularDependencies] = await Promise.all([
   api.getDependencies({ filePath, depth: 2, includePackages: true }),
-  api.findCircularDependencies({ filePath, maxDepth: 5 })
+  api.findCircularDependencies({ filePath })
 ]);
 return { dependencies, circularDependencies };
 ```
