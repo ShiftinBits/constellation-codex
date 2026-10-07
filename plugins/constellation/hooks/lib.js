@@ -48,6 +48,20 @@ function isConfigured(env = process.env) {
   return (env.CONSTELLATION_ACCESS_KEY || '').startsWith('ak:');
 }
 
+/** Resolves `target` against `cwd` into an absolute, forward-slash path with no `.` or `..` segments. */
+function absolute(target, cwd) {
+  const full = target.replace(/\\/g, '/');
+  const joined = /^([A-Za-z]:)?\//.test(full) ? full : `${cwd.replace(/\\/g, '/')}/${full}`;
+  const rootMatch = /^([A-Za-z]:)?\//.exec(joined);
+  const root = rootMatch ? rootMatch[0] : '/';
+  const segments = [];
+  for (const segment of joined.slice(root.length).split('/')) {
+    if (segment === '..') segments.pop();
+    else if (segment !== '' && segment !== '.') segments.push(segment);
+  }
+  return root + segments.join('/');
+}
+
 function findUp(start, name) {
   let dir = path.resolve(start);
   for (;;) {
@@ -130,6 +144,7 @@ function pruneStates() {
 }
 
 module.exports = {
+  absolute,
   contextOutput,
   emit,
   isConfigured,

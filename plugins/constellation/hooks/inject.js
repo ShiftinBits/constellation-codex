@@ -1,37 +1,29 @@
 'use strict';
 
-const { contextOutput, emit, isConfigured, readInput } = require('./lib');
+const { contextOutput, emit, isConfigured, projectRoot, pruneStates, readInput } = require('./lib');
 
-const SESSION_START_REMINDER =
-  'Use code_intel for structural code questions: definitions, references, callers, dependencies, impact, architecture, and orphaned code. Use local file/text tools for exact strings, config values, logs, docs, file contents, or unindexed projects.';
-const TOOL_USE_REMINDER =
-  'This looks like text search. If you are looking for symbols, references, callers, dependencies, or impact, use code_intel. If you need exact strings, config values, logs, or raw file contents, local search is appropriate.';
+const SESSION_TEXT =
+  'Constellation code intelligence is available through the code_intel tool for this project. Prefer code_intel over text search for definitions and details (searchSymbols, getSymbolDetails), usages and callers (traceSymbolUsage, getCallGraph), dependencies and cycles (getDependencies, getDependents, findCircularDependencies), architecture (getArchitectureOverview), and dead code (findOrphanedCode). Run impactAnalysis before editing a shared symbol. Use text search for literal strings, config values, logs, and code the project does not index.';
 
-const ADDITIONAL_CONTEXT = {
-  SessionStart: SESSION_START_REMINDER,
-  PreToolUse: TOOL_USE_REMINDER,
-  PostToolUse: TOOL_USE_REMINDER,
-};
+const EVENTS = new Set(['SessionStart', 'SubagentStart']);
 
-function buildHookOutput(hookEventName) {
-  const additionalContext = ADDITIONAL_CONTEXT[hookEventName];
-  if (!additionalContext) return null;
-  return contextOutput(hookEventName, additionalContext);
-}
-
-async function run(argvEvent) {
+async function run() {
   if (!isConfigured()) return;
+
   const input = await readInput();
-  const hookEventName = input.hook_event_name || argvEvent;
-  emit(buildHookOutput(hookEventName));
+  const hookEventName = input.hook_event_name;
+  if (!EVENTS.has(hookEventName)) return;
+  if (projectRoot(input.cwd) === null) return;
+
+  if (hookEventName === 'SessionStart') pruneStates();
+  emit(contextOutput(hookEventName, SESSION_TEXT));
 }
 
 if (require.main === module) {
-  run(process.argv[2]).catch(() => {});
+  run().catch(() => {});
 }
 
 module.exports = {
-  ADDITIONAL_CONTEXT,
-  buildHookOutput,
+  SESSION_TEXT,
   run,
 };

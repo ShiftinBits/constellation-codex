@@ -7,14 +7,26 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/hooks/inject.js SessionStart",
+            "command": "node ${PLUGIN_ROOT}/hooks/inject.js",
             "statusMessage": "Loading Constellation guidance...",
             "timeout": 3
           }
         ]
       }
     ],
-    "PreToolUse": [
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${PLUGIN_ROOT}/hooks/inject.js",
+            "statusMessage": "Loading Constellation guidance...",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
@@ -22,6 +34,17 @@
             "type": "command",
             "command": "node ${PLUGIN_ROOT}/hooks/bash.js",
             "statusMessage": "Consulting Constellation...",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__constellation__code_intel",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${PLUGIN_ROOT}/hooks/code-intel.js",
+            "statusMessage": "Recording Constellation use...",
             "timeout": 2
           }
         ]

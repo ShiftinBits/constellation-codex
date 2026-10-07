@@ -2,11 +2,12 @@
   "session_id": "sess-abc123",
   "transcript_path": null,
   "cwd": "/tmp/example-project",
-  "hook_event_name": "PreToolUse",
+  "hook_event_name": "PostToolUse",
   "model": "gpt-5",
   "permission_mode": "default",
   "turn_id": "turn-1",
   "tool_name": "Bash",
-  "tool_use_id": "call-2",
-  "tool_input": { "command": "ls -la" }
+  "tool_use_id": "call-6",
+  "tool_input": { "command": "rg \"UserService\"" },
+  "tool_response": ""
 }
