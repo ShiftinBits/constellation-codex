@@ -79,6 +79,17 @@ function projectRoot(cwd) {
   return findUp(cwd, PROJECT_FILE);
 }
 
+/** True when a directory directly under `cwd` holds a constellation.json, as in a workspace of indexed projects. */
+function hasIndexedChild(cwd) {
+  try {
+    return fs
+      .readdirSync(cwd, { withFileTypes: true })
+      .some((entry) => entry.isDirectory() && fs.existsSync(path.join(cwd, entry.name, PROJECT_FILE)));
+  } catch {
+    return false;
+  }
+}
+
 /** The nearest directory at or above `cwd` holding a .git entry (directory or file), or null. */
 function gitRoot(cwd) {
   if (typeof cwd !== 'string' || cwd === '') return null;
@@ -187,6 +198,7 @@ module.exports = {
   contextOutput,
   emit,
   gitRoot,
+  hasIndexedChild,
   isConfigured,
   loadState,
   projectRoot,

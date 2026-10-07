@@ -2,7 +2,7 @@
 
 const { bashSearch, symbolOf } = require('./classify');
 const { freshnessNotice } = require('./freshness');
-const { absolute, contextOutput, emit, isConfigured, loadState, projectRoot, readInput, saveState } = require('./lib');
+const { absolute, contextOutput, emit, hasIndexedChild, isConfigured, loadState, projectRoot, readInput, saveState } = require('./lib');
 
 const DEFAULT_NUDGE_LIMIT = 3;
 
@@ -46,7 +46,9 @@ function nudgeFor(command, input, state) {
   if (search === null) return null;
   const symbol = symbolOf(search.pattern);
   if (symbol === null) return null;
-  if (projectRoot(absolute(search.path === undefined ? '.' : search.path, input.cwd)) === null) return null;
+  // Codex reports the session cwd, not the command's workdir, so a session started above indexed projects counts too.
+  const target = absolute(search.path === undefined ? '.' : search.path, input.cwd);
+  if (projectRoot(target) === null && !hasIndexedChild(target)) return null;
 
   const agentKey = typeof input.agent_id === 'string' && input.agent_id !== '' ? input.agent_id : 'main';
   const codeIntelTurn = state.codeIntelTurn || {};

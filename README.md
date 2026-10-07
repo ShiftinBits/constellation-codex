@@ -40,7 +40,7 @@ Event hooks enable intelligent, transparent assistance:
 | **Freshness note** | `PostToolUse` (`Bash`) | After a git command that moves HEAD (`commit`, `pull`, `checkout`, `merge`, `rebase`), warns once per HEAD when the index is behind your checkout and suggests `constellation index` |
 | **Usage tracking** | `PostToolUse` (`mcp__constellation__code_intel`) | Records that `code_intel` was used so nudges stay quiet for that turn, and remembers which commit the index reflects |
 
-All hooks except the setup check require an `ak:` access key and a `constellation.json` in the project tree, so they stay silent elsewhere. Nudges are limited per session (3 by default, tracked separately for each subagent). Hooks never send source code anywhere; they read only the hook input and local files, and fail open if anything goes wrong.
+All hooks except the setup check require an `ak:` access key and a `constellation.json` in the project tree (or, when Codex starts in a folder above several projects, in one of its subdirectories), so they stay silent elsewhere. Nudges are limited per session (3 by default, tracked separately for each subagent). Hooks never send source code anywhere; they read only the hook input and local files, and fail open if anything goes wrong.
 
 Hooks are on by default (`[features].hooks = false` turns them off). After install, and after any plugin update that changes hooks, open `/hooks` in Codex and re-trust the Constellation hooks, or they will not run.
 

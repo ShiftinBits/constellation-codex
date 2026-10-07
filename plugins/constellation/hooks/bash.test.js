@@ -69,6 +69,14 @@ test('no nudge outside a constellation.json tree', () => {
   assert.strictEqual(runScript(HOOK, search(bare, 'rg UserService'), { data }).stdout, '');
 });
 
+test('a session started above indexed projects still nudges', () => {
+  const { data } = setup();
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-ws-'));
+  fs.mkdirSync(path.join(workspace, 'api'));
+  fs.writeFileSync(path.join(workspace, 'api', 'constellation.json'), '{}');
+  assert.notStrictEqual(runScript(HOOK, search(workspace, 'rg "UserService"'), { data }).stdout, '');
+});
+
 test('no nudge without an ak: key', () => {
   const { root, data } = setup();
   assert.strictEqual(runScript(HOOK, search(root, 'rg UserService'), { data, key: '' }).stdout, '');
