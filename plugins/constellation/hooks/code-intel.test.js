@@ -50,3 +50,40 @@ test('malformed stdin and a missing turn write nothing', () => {
   assert.strictEqual(runHook(noTurn, { data }).status, 0);
   assert.strictEqual(fs.existsSync(path.join(data, 'sessions')), false);
 });
+
+function indexedRoot() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-ci-'));
+  fs.writeFileSync(path.join(root, 'constellation.json'), '{}');
+  return root;
+}
+
+test('stores the indexed commit for the project root from structuredContent', () => {
+  const data = dataDir();
+  const root = indexedRoot();
+  runHook({ ...fixture('post-tool-use-code-intel.json'), cwd: path.join(root) }, { data });
+  assert.deepStrictEqual(stateOf(data, 'sess-abc123').index, {
+    [root]: { asOfCommit: '0123456789abcdef0123456789abcdef01234567', lastIndexedAt: '2026-01-01T00:00:00.000Z' },
+  });
+});
+
+test('stores the indexed commit from a text block and without a turn id', () => {
+  const data = dataDir();
+  const root = indexedRoot();
+  const input = fixture('post-tool-use-code-intel.json');
+  delete input.turn_id;
+  delete input.tool_response.structuredContent;
+  runHook({ ...input, cwd: root }, { data });
+  const state = stateOf(data, 'sess-abc123');
+  assert.strictEqual(state.index[root].asOfCommit, '0123456789abcdef0123456789abcdef01234567');
+  assert.strictEqual(state.codeIntelTurn, undefined);
+});
+
+test('does not store an invalid commit or an error envelope', () => {
+  const data = dataDir();
+  const root = indexedRoot();
+  const bad = fixture('post-tool-use-code-intel.json');
+  bad.tool_response.structuredContent.asOfCommit = '--upload-pack=x';
+  runHook({ ...bad, cwd: root }, { data });
+  runHook({ ...fixture('post-tool-use-code-intel-error.json'), cwd: root }, { data });
+  assert.strictEqual(stateOf(data, 'sess-abc123').index, undefined);
+});

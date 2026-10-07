@@ -1,6 +1,7 @@
 'use strict';
 
 const { bashSearch, symbolOf } = require('./classify');
+const { freshnessNotice } = require('./freshness');
 const { absolute, contextOutput, emit, isConfigured, loadState, projectRoot, readInput, saveState } = require('./lib');
 
 const DEFAULT_NUDGE_LIMIT = 3;
@@ -24,22 +25,37 @@ async function run() {
   const command = input.tool_input && input.tool_input.command;
   if (typeof command !== 'string' || typeof input.cwd !== 'string' || input.cwd === '') return;
 
+  const state = loadState(input.session_id);
+  const notice = freshnessNotice(command, input.cwd, state);
+  const base = notice === null ? state : notice.state;
+  const nudge = nudgeFor(command, input, base);
+
+  const next = nudge === null ? base : nudge.state;
+  if (next !== state) saveState(input.session_id, next);
+
+  const text = [notice && notice.context, nudge && nudge.text].filter(Boolean).join('\n\n');
+  if (text === '' && !(notice && notice.systemMessage)) return;
+  const output = text === '' ? {} : contextOutput('PostToolUse', text);
+  if (notice && notice.systemMessage) output.systemMessage = notice.systemMessage;
+  emit(output);
+}
+
+/** The search nudge for `command` and the session state it leaves, or null when no nudge applies. */
+function nudgeFor(command, input, state) {
   const search = bashSearch(command);
-  if (search === null) return;
+  if (search === null) return null;
   const symbol = symbolOf(search.pattern);
-  if (symbol === null) return;
-  if (projectRoot(absolute(search.path === undefined ? '.' : search.path, input.cwd)) === null) return;
+  if (symbol === null) return null;
+  if (projectRoot(absolute(search.path === undefined ? '.' : search.path, input.cwd)) === null) return null;
 
   const agentKey = typeof input.agent_id === 'string' && input.agent_id !== '' ? input.agent_id : 'main';
-  const state = loadState(input.session_id);
   const codeIntelTurn = state.codeIntelTurn || {};
   const nudges = state.nudges || {};
-  if (typeof input.turn_id === 'string' && codeIntelTurn[agentKey] === input.turn_id) return;
+  if (typeof input.turn_id === 'string' && codeIntelTurn[agentKey] === input.turn_id) return null;
   const sent = nudges[agentKey] || 0;
-  if (sent >= nudgeLimit()) return;
+  if (sent >= nudgeLimit()) return null;
 
-  saveState(input.session_id, { ...state, nudges: { ...nudges, [agentKey]: sent + 1 } });
-  emit(contextOutput('PostToolUse', nudgeText(symbol)));
+  return { text: nudgeText(symbol), state: { ...state, nudges: { ...nudges, [agentKey]: sent + 1 } } };
 }
 
 if (require.main === module) {

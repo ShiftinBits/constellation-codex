@@ -2,7 +2,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { spawnSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -125,4 +125,74 @@ test('code_intel in one agent does not silence another', () => {
   runScript(CODE_INTEL_HOOK, { ...fixture('post-tool-use-code-intel.json'), cwd: root, agent_id: 'agent-1' }, { data });
   assert.strictEqual(runScript(HOOK, search(root, 'rg UserService', { agent_id: 'agent-1' }), { data }).stdout, '');
   assert.notStrictEqual(runScript(HOOK, search(root, 'rg UserService'), { data }).stdout, '');
+});
+
+function gitIn(dir, ...args) {
+  return execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', ...args], {
+    cwd: dir,
+    encoding: 'utf8',
+  }).trim();
+}
+
+/** An indexed project whose HEAD is one commit past the commit the index reflects; the session has seen that index. */
+function behindProject(data) {
+  const root = indexedProject();
+  gitIn(root, 'init', '-q');
+  gitIn(root, 'add', 'constellation.json');
+  gitIn(root, 'commit', '-q', '-m', 'first');
+  const indexed = gitIn(root, 'rev-parse', 'HEAD');
+  fs.writeFileSync(path.join(root, 'a.txt'), 'a');
+  gitIn(root, 'add', 'a.txt');
+  gitIn(root, 'commit', '-q', '-m', 'second');
+  const response = { structuredContent: { success: true, asOfCommit: indexed, lastIndexedAt: '2026-01-01T00:00:00.000Z' } };
+  runScript(CODE_INTEL_HOOK, { ...fixture('post-tool-use-code-intel.json'), cwd: root, tool_response: response }, { data });
+  return { root, indexed };
+}
+
+const gitCall = (root, command, extra = {}) => ({ ...fixture('post-tool-use-bash.json'), cwd: root, tool_input: { command }, ...extra });
+
+for (const verb of ['commit', 'pull', 'checkout', 'merge', 'rebase']) {
+  test(`git ${verb} warns when the index is behind HEAD`, () => {
+    const data = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-data-'));
+    const { root, indexed } = behindProject(data);
+    const result = runScript(HOOK, gitCall(root, `git ${verb} somewhere`), { data });
+    assert.strictEqual(result.status, 0);
+    const output = JSON.parse(result.stdout);
+    assert.strictEqual(output.hookSpecificOutput.hookEventName, 'PostToolUse');
+    assert.ok(output.hookSpecificOutput.additionalContext.includes(`\`${indexed.slice(0, 7)}\``));
+    assert.match(output.hookSpecificOutput.additionalContext, /\(1 commit behind\)/);
+    assert.match(output.systemMessage, /constellation index/);
+  });
+}
+
+test('the freshness warning fires once per HEAD and the reindex suggestion once per session', () => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-data-'));
+  const { root } = behindProject(data);
+  assert.notStrictEqual(runScript(HOOK, gitCall(root, 'git pull'), { data }).stdout, '');
+  assert.strictEqual(runScript(HOOK, gitCall(root, 'git pull'), { data }).stdout, '');
+
+  fs.writeFileSync(path.join(root, 'b.txt'), 'b');
+  gitIn(root, 'add', 'b.txt');
+  gitIn(root, 'commit', '-q', '-m', 'third');
+  const output = JSON.parse(runScript(HOOK, gitCall(root, 'git commit'), { data }).stdout);
+  assert.match(output.hookSpecificOutput.additionalContext, /\(2 commits behind\)/);
+  assert.strictEqual(output.systemMessage, undefined);
+});
+
+test('a non-git command does not warn', () => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-data-'));
+  const { root } = behindProject(data);
+  assert.strictEqual(runScript(HOOK, gitCall(root, 'ls -la'), { data }).stdout, '');
+});
+
+test('git moves without a known indexed commit stay silent and spawn no git', () => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-data-'));
+  const root = indexedProject();
+  const shim = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-shim-'));
+  const marker = path.join(shim, 'spawned');
+  fs.writeFileSync(path.join(shim, 'git'), `#!/bin/sh\ntouch "${marker}"\n`, { mode: 0o755 });
+  const env = { ...process.env, CONSTELLATION_ACCESS_KEY: 'ak:test', PLUGIN_DATA: data, PATH: `${shim}${path.delimiter}${process.env.PATH}` };
+  const result = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(gitCall(root, 'git pull')), env, encoding: 'utf8' });
+  assert.strictEqual(result.stdout, '');
+  assert.ok(!fs.existsSync(marker));
 });
