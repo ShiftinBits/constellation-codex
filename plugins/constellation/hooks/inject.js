@@ -1,5 +1,7 @@
 'use strict';
 
+const { contextOutput, emit, isConfigured, readInput } = require('./lib');
+
 const SESSION_START_REMINDER =
   'Use code_intel for structural code questions: definitions, references, callers, dependencies, impact, architecture, and orphaned code. Use local file/text tools for exact strings, config values, logs, docs, file contents, or unindexed projects.';
 const TOOL_USE_REMINDER =
@@ -11,39 +13,25 @@ const ADDITIONAL_CONTEXT = {
   PostToolUse: TOOL_USE_REMINDER,
 };
 
-function isConstellationEnabled() {
-  const accessKey = process.env.CONSTELLATION_ACCESS_KEY || '';
-  return accessKey.startsWith('ak:');
-}
-
 function buildHookOutput(hookEventName) {
   const additionalContext = ADDITIONAL_CONTEXT[hookEventName];
   if (!additionalContext) return null;
-
-  return {
-    hookSpecificOutput: {
-      hookEventName,
-      additionalContext,
-    },
-  };
+  return contextOutput(hookEventName, additionalContext);
 }
 
-function run(hookEventName) {
-  if (!isConstellationEnabled()) return;
-
-  const output = buildHookOutput(hookEventName);
-  if (!output) return;
-
-  process.stdout.write(JSON.stringify(output));
+async function run(argvEvent) {
+  if (!isConfigured()) return;
+  const input = await readInput();
+  const hookEventName = input.hook_event_name || argvEvent;
+  emit(buildHookOutput(hookEventName));
 }
 
 if (require.main === module) {
-  run(process.argv[2]);
+  run(process.argv[2]).catch(() => {});
 }
 
 module.exports = {
   ADDITIONAL_CONTEXT,
   buildHookOutput,
-  isConstellationEnabled,
   run,
 };

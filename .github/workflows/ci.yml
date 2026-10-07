@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Run hook tests
+        run: npm test
+
+      - name: Validate manifests
+        run: |
+          node -e '
+          for (const f of [
+            "plugins/constellation/.codex-plugin/plugin.json",
+            "plugins/constellation/.mcp.json",
+            "plugins/constellation/hooks/hooks.json",
+            ".agents/plugins/marketplace.json",
+          ]) {
+            JSON.parse(require("fs").readFileSync(f, "utf8"));
+            console.log("ok " + f);
+          }
+          '

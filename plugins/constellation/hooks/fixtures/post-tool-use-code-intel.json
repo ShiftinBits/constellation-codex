@@ -1,0 +1,23 @@
+{
+  "session_id": "sess-abc123",
+  "transcript_path": null,
+  "cwd": "/tmp/example-project",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-5",
+  "permission_mode": "default",
+  "turn_id": "turn-1",
+  "tool_name": "mcp__constellation__code_intel",
+  "tool_use_id": "call-4",
+  "tool_input": { "code": "return await api.searchSymbols({ query: 'UserService' });", "cwd": "/tmp/example-project" },
+  "tool_response": {
+    "content": [
+      { "type": "text", "text": "{\"success\":true,\"result\":{\"symbols\":[]},\"asOfCommit\":\"0123456789abcdef0123456789abcdef01234567\",\"lastIndexedAt\":\"2026-01-01T00:00:00.000Z\"}" }
+    ],
+    "structuredContent": {
+      "success": true,
+      "result": { "symbols": [] },
+      "asOfCommit": "0123456789abcdef0123456789abcdef01234567",
+      "lastIndexedAt": "2026-01-01T00:00:00.000Z"
+    }
+  }
+}
