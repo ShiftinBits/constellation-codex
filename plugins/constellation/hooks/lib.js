@@ -116,28 +116,60 @@ function loadState(sessionId) {
   }
 }
 
-/** Atomically saves session state; never throws. */
-function saveState(sessionId, state) {
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** The entries of `next` that differ from `prev`, compared at the top level and one level down. */
+function changes(prev, next) {
+  const patch = {};
+  for (const [key, value] of Object.entries(next)) {
+    if (value === prev[key]) continue;
+    if (isRecord(value) && isRecord(prev[key])) {
+      const sub = {};
+      for (const [subKey, subValue] of Object.entries(value)) {
+        if (subValue !== prev[key][subKey]) sub[subKey] = subValue;
+      }
+      patch[key] = sub;
+    } else {
+      patch[key] = value;
+    }
+  }
+  return patch;
+}
+
+/**
+ * Atomically saves session state; never throws. Hooks for one session run as
+ * separate processes that can overlap, so only what changed between `prev`
+ * (the state the caller loaded) and `next` is merged into the state on disk
+ * re-read just before writing.
+ */
+function saveState(sessionId, next, prev = {}) {
   try {
     const id = sanitizeSessionId(sessionId);
     if (!id) return;
     const dir = sessionsDir();
     fs.mkdirSync(dir, { recursive: true });
+    // ponytail: re-read then rename leaves a tiny window for a lost update; add a lock file if that ever shows up.
+    const merged = loadState(id);
+    for (const [key, value] of Object.entries(changes(prev, next))) {
+      merged[key] = isRecord(value) && isRecord(merged[key]) ? { ...merged[key], ...value } : value;
+    }
     const tmp = path.join(dir, `.${id}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
-    fs.writeFileSync(tmp, JSON.stringify(state));
+    fs.writeFileSync(tmp, JSON.stringify(merged));
     fs.renameSync(tmp, path.join(dir, `${id}.json`));
   } catch {
     // State is best effort.
   }
 }
 
-/** Deletes session state files older than seven days; never throws. */
+/** Deletes session state files, and temp files left by an interrupted save, older than seven days; never throws. */
 function pruneStates() {
   try {
     const dir = sessionsDir();
     const cutoff = Date.now() - STATE_MAX_AGE_MS;
     for (const name of fs.readdirSync(dir)) {
-      if (!name.endsWith('.json')) continue;
+      if (!name.endsWith('.json') && !name.endsWith('.tmp')) continue;
       try {
         const file = path.join(dir, name);
         if (fs.statSync(file).mtimeMs < cutoff) fs.unlinkSync(file);

@@ -31,7 +31,7 @@ async function run() {
   const nudge = nudgeFor(command, input, base);
 
   const next = nudge === null ? base : nudge.state;
-  if (next !== state) saveState(input.session_id, next);
+  if (next !== state) saveState(input.session_id, next, state);
 
   const text = [notice && notice.context, nudge && nudge.text].filter(Boolean).join('\n\n');
   if (text === '' && !(notice && notice.systemMessage)) return;

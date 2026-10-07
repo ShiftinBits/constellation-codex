@@ -57,10 +57,13 @@ function indexedRoot() {
   return root;
 }
 
+/** The fixture with both the session cwd and the code_intel call's cwd at `cwd`. */
+const at = (input, cwd) => ({ ...input, cwd, tool_input: { ...input.tool_input, cwd } });
+
 test('stores the indexed commit for the project root from structuredContent', () => {
   const data = dataDir();
   const root = indexedRoot();
-  runHook({ ...fixture('post-tool-use-code-intel.json'), cwd: path.join(root) }, { data });
+  runHook(at(fixture('post-tool-use-code-intel.json'), root), { data });
   assert.deepStrictEqual(stateOf(data, 'sess-abc123').index, {
     [root]: { asOfCommit: '0123456789abcdef0123456789abcdef01234567', lastIndexedAt: '2026-01-01T00:00:00.000Z' },
   });
@@ -72,7 +75,7 @@ test('stores the indexed commit from a text block and without a turn id', () => 
   const input = fixture('post-tool-use-code-intel.json');
   delete input.turn_id;
   delete input.tool_response.structuredContent;
-  runHook({ ...input, cwd: root }, { data });
+  runHook(at(input, root), { data });
   const state = stateOf(data, 'sess-abc123');
   assert.strictEqual(state.index[root].asOfCommit, '0123456789abcdef0123456789abcdef01234567');
   assert.strictEqual(state.codeIntelTurn, undefined);
@@ -83,7 +86,18 @@ test('does not store an invalid commit or an error envelope', () => {
   const root = indexedRoot();
   const bad = fixture('post-tool-use-code-intel.json');
   bad.tool_response.structuredContent.asOfCommit = '--upload-pack=x';
-  runHook({ ...bad, cwd: root }, { data });
-  runHook({ ...fixture('post-tool-use-code-intel-error.json'), cwd: root }, { data });
+  runHook(at(bad, root), { data });
+  runHook(at(fixture('post-tool-use-code-intel-error.json'), root), { data });
   assert.strictEqual(stateOf(data, 'sess-abc123').index, undefined);
+});
+
+test('stores the indexed commit for the project the call queried, not the session cwd', () => {
+  const data = dataDir();
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-ws-'));
+  const project = path.join(workspace, 'api');
+  fs.mkdirSync(project);
+  fs.writeFileSync(path.join(project, 'constellation.json'), '{}');
+  const input = fixture('post-tool-use-code-intel.json');
+  runHook({ ...input, cwd: workspace, tool_input: { ...input.tool_input, cwd: 'api' } }, { data });
+  assert.deepStrictEqual(Object.keys(stateOf(data, 'sess-abc123').index), [project]);
 });

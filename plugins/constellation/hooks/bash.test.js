@@ -145,7 +145,8 @@ function behindProject(data) {
   gitIn(root, 'add', 'a.txt');
   gitIn(root, 'commit', '-q', '-m', 'second');
   const response = { structuredContent: { success: true, asOfCommit: indexed, lastIndexedAt: '2026-01-01T00:00:00.000Z' } };
-  runScript(CODE_INTEL_HOOK, { ...fixture('post-tool-use-code-intel.json'), cwd: root, tool_response: response }, { data });
+  const stamp = fixture('post-tool-use-code-intel.json');
+  runScript(CODE_INTEL_HOOK, { ...stamp, cwd: root, tool_input: { ...stamp.tool_input, cwd: root }, tool_response: response }, { data });
   return { root, indexed };
 }
 

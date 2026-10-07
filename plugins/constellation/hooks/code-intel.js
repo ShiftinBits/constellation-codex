@@ -1,7 +1,7 @@
 'use strict';
 
 const { COMMIT, envelopeOf } = require('./freshness');
-const { isConfigured, loadState, projectRoot, readInput, saveState } = require('./lib');
+const { absolute, isConfigured, loadState, projectRoot, readInput, saveState } = require('./lib');
 
 /**
  * Records that the agent used code_intel in the current turn, which silences the search nudge for that turn,
@@ -20,14 +20,18 @@ async function run() {
   }
 
   const envelope = envelopeOf(input.tool_response);
-  const root = typeof input.cwd === 'string' ? projectRoot(input.cwd) : null;
+  // The project that answered is the call's own cwd, which can differ from the session cwd.
+  const queried = input.tool_input && typeof input.tool_input.cwd === 'string' && input.tool_input.cwd !== '' ? input.tool_input.cwd : null;
+  const base = typeof input.cwd === 'string' ? input.cwd : null;
+  const target = queried !== null && base !== null ? absolute(queried, base) : queried || base;
+  const root = target === null ? null : projectRoot(target);
   if (envelope !== null && root !== null && typeof envelope.asOfCommit === 'string' && COMMIT.test(envelope.asOfCommit)) {
     const entry = { asOfCommit: envelope.asOfCommit };
     if (envelope.lastIndexedAt !== undefined) entry.lastIndexedAt = envelope.lastIndexedAt;
     next = { ...next, index: { ...(state.index || {}), [root]: entry } };
   }
 
-  if (next !== state) saveState(input.session_id, next);
+  if (next !== state) saveState(input.session_id, next, state);
 }
 
 if (require.main === module) {

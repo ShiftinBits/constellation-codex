@@ -164,3 +164,39 @@ test('pruneStates removes only files older than seven days', () => {
     delete process.env.PLUGIN_DATA;
   }
 });
+
+test('saveState merges only what changed, so overlapping hooks keep each other\'s writes', () => {
+  const data = tmpDir();
+  process.env.PLUGIN_DATA = data;
+  try {
+    lib.saveState('abc', { nudges: { main: 1 }, index: { '/a': { asOfCommit: 'aaaaaaa' } } });
+    const first = lib.loadState('abc');
+    const second = lib.loadState('abc');
+    lib.saveState('abc', { ...second, codeIntelTurn: { main: 'turn-2' } }, second);
+    lib.saveState('abc', { ...first, nudges: { ...first.nudges, agent: 1 } }, first);
+    assert.deepStrictEqual(lib.loadState('abc'), {
+      nudges: { main: 1, agent: 1 },
+      index: { '/a': { asOfCommit: 'aaaaaaa' } },
+      codeIntelTurn: { main: 'turn-2' },
+    });
+  } finally {
+    delete process.env.PLUGIN_DATA;
+  }
+});
+
+test('pruneStates removes temp files left by an interrupted save', () => {
+  const data = tmpDir();
+  process.env.PLUGIN_DATA = data;
+  try {
+    lib.saveState('abc', { a: 1 });
+    const stale = path.join(data, 'sessions', '.abc.1.2.x.tmp');
+    fs.writeFileSync(stale, '{}');
+    const eightDays = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    fs.utimesSync(stale, eightDays, eightDays);
+    lib.pruneStates();
+    assert.strictEqual(fs.existsSync(stale), false);
+    assert.deepStrictEqual(lib.loadState('abc'), { a: 1 });
+  } finally {
+    delete process.env.PLUGIN_DATA;
+  }
+});

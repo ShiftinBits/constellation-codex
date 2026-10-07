@@ -82,6 +82,17 @@ test('SessionStart startup in a git repo without constellation.json says the pro
   assert.strictEqual(runHook({ ...input, source: 'resume' }).stdout, '');
 });
 
+test('SessionStart in a workspace whose subdirectories are indexed emits session guidance, not the not-indexed note', () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-ws-'));
+  fs.mkdirSync(path.join(workspace, '.git'));
+  fs.mkdirSync(path.join(workspace, 'api'));
+  fs.writeFileSync(path.join(workspace, 'api', 'constellation.json'), '{}');
+  const input = { ...fixture('session-start.json'), source: 'startup', cwd: workspace };
+  assert.deepStrictEqual(JSON.parse(runHook(input).stdout), {
+    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: SESSION_TEXT },
+  });
+});
+
 test('SessionStart startup in an indexed project emits only the session text', () => {
   const input = { ...fixture('session-start.json'), source: 'startup', cwd: indexedProject() };
   assert.deepStrictEqual(JSON.parse(runHook(input).stdout), {

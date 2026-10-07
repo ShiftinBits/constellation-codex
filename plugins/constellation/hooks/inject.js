@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const { contextOutput, emit, gitRoot, isConfigured, projectRoot, pruneStates, readInput } = require('./lib');
 
 const SESSION_TEXT =
@@ -13,6 +15,17 @@ const MISSING_KEY_MESSAGE =
 const NOT_INDEXED_TEXT =
   'Constellation is configured, but this project is not indexed (no constellation.json was found). If the user asks structural questions about the code (dependencies, callers, impact, architecture, dead code), suggest running `constellation init` and `constellation index`, or the $constellation:get-started skill. Use text search in the meantime.';
 
+/** True when a directory directly under `cwd` holds a constellation.json, as in a workspace of indexed projects. */
+function hasIndexedChild(cwd) {
+  try {
+    return fs
+      .readdirSync(cwd, { withFileTypes: true })
+      .some((entry) => entry.isDirectory() && fs.existsSync(path.join(cwd, entry.name, 'constellation.json')));
+  } catch {
+    return false;
+  }
+}
+
 async function run() {
   const input = await readInput();
   const hookEventName = input.hook_event_name;
@@ -25,7 +38,7 @@ async function run() {
     return;
   }
 
-  if (projectRoot(input.cwd) === null) {
+  if (projectRoot(input.cwd) === null && !hasIndexedChild(input.cwd)) {
     if (hookEventName === 'SessionStart' && input.source === 'startup' && gitRoot(input.cwd) !== null) {
       emit(contextOutput(hookEventName, NOT_INDEXED_TEXT));
     }
