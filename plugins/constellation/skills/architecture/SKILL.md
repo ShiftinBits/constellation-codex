@@ -1,6 +1,6 @@
 ---
 name: architecture
-description: Use when invoking $constellation:architecture.
+description: "Use to explain codebase structure, module layout, languages, and dependency hotspots, or to orient in an unfamiliar project. Not for literal string, config, or log search."
 ---
 
 # Constellation Architecture

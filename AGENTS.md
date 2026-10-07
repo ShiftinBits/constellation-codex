@@ -4,12 +4,14 @@ Codex plugin for Constellation code intelligence.
 
 ## Structure
 
-- `.codex-plugin/plugin.json`: plugin manifest.
-- `.mcp.json`: stdio MCP server config.
-- `skills/*/SKILL.md`: active `$constellation:*` workflows and skills.
-- `hooks/hooks.json`: Codex `SessionStart` and `PreToolUse` hooks.
+- `.agents/plugins/marketplace.json`: local marketplace (`constellation-local`).
+- `plugins/constellation/.codex-plugin/plugin.json`: plugin manifest.
+- `plugins/constellation/.mcp.json`: stdio MCP server config.
+- `plugins/constellation/skills/*/SKILL.md`: active `$constellation:*` workflows and skills.
+- `plugins/constellation/skills/*/agents/openai.yaml`: per-skill Codex metadata and invocation policy.
+- `plugins/constellation/hooks/hooks.json`: Codex `SessionStart` and `PreToolUse` hooks.
 - `output-styles/`: parity reference.
-- `assets/`: icons.
+- `plugins/constellation/assets/`: icons.
 
 ## Rules
 

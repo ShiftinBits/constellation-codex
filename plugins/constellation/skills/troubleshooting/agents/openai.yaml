@@ -1,0 +1,10 @@
+interface:
+  display_name: "Constellation Troubleshooting"
+  short_description: "Diagnose Constellation errors and setup failures"
+  default_prompt: "Help me troubleshoot a Constellation error or indexing problem."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "constellation"
+      description: "Constellation code intelligence MCP server"
+      transport: "stdio"

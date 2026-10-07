@@ -1,6 +1,6 @@
 ---
 name: unused
-description: Use when invoking $constellation:unused.
+description: "Use to find dead code, unused or orphaned exports, and unreferenced functions, classes, types, or variables before cleanup. Not for literal string, config, or log search."
 ---
 
 # Constellation Unused

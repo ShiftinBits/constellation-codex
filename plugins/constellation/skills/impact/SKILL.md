@@ -1,6 +1,6 @@
 ---
-name: impact-analysis
-description: Use when invoking $constellation:impact.
+name: impact
+description: "Use before refactoring, renaming, deleting, or moving a shared function, class, or type, and for \"what breaks if I change X\" or blast-radius questions. Reports risk level, affected files, and test exposure. Not for literal string, config, or log search."
 ---
 
 # Constellation Impact

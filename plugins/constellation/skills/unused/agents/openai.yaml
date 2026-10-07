@@ -1,0 +1,10 @@
+interface:
+  display_name: "Constellation Unused"
+  short_description: "Find dead code and orphaned exports"
+  default_prompt: "Find unused exports and dead code in this project."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "constellation"
+      description: "Constellation code intelligence MCP server"
+      transport: "stdio"

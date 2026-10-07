@@ -1,0 +1,12 @@
+interface:
+  display_name: "Constellation Diagnose"
+  short_description: "Quick health check for connectivity and auth"
+  default_prompt: "Run a Constellation health check covering MCP, authentication, and indexing."
+policy:
+  allow_implicit_invocation: false
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "constellation"
+      description: "Constellation code intelligence MCP server"
+      transport: "stdio"

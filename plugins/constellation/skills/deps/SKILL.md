@@ -1,6 +1,6 @@
 ---
 name: deps
-description: Use when invoking $constellation:deps.
+description: "Use to find what a file imports or what depends on a file or module, including circular dependencies. Pass --reverse for dependents. Not for literal string, config, or log search."
 ---
 
 # Constellation Deps

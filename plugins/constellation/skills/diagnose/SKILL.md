@@ -1,6 +1,6 @@
 ---
 name: diagnose
-description: Use when invoking $constellation:diagnose.
+description: "Use only when the user explicitly invokes $constellation:diagnose. Runs a quick health check of Constellation connectivity, authentication, and indexing. Not for code search or analysis."
 ---
 
 # Constellation Diagnose

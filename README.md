@@ -8,25 +8,24 @@ While Constellation's MCP server provides raw code intelligence capabilities, th
 |---------|---------|
 | **Constellation Skills** | `$constellation:` workflows for common code intelligence tasks |
 | **Troubleshooting Skill** | Targeted diagnostics for auth, indexing, API, and MCP failures |
-| **Impact Analysis Skill** | Pre-change blast-radius guidance before refactors, renames, or deletions |
+| **Impact Skill** | Pre-change blast-radius guidance before refactors, renames, or deletions |
 | **Safety Hooks** | Reminders to prefer `code_intel` over text search for structural queries |
 
 ## Features
 
 ### Skills
 
-Reusable `$constellation:` skills for structural analysis and plugin diagnostics:
+Reusable `$constellation:` skills for structural analysis and plugin diagnostics. Codex also selects `impact`, `deps`, `unused`, `architecture`, and `troubleshooting` on its own when a request matches; `status` and `diagnose` run only when you invoke them:
 
 | Skill | Description |
 |---------|-------------|
 | `$constellation:status` | Check API connectivity and project indexing status |
 | `$constellation:diagnose` | Quick health check for connectivity and authentication |
-| `$constellation:impact <symbol> <file>` | Analyze blast radius before changing a symbol |
+| `$constellation:impact <symbol> [file]` | Analyze blast radius before changing a symbol |
 | `$constellation:deps <file> [--reverse]` | Map dependencies or find what depends on a file |
 | `$constellation:unused` | Discover orphaned exports and dead code |
 | `$constellation:architecture` | Get a high-level overview of your codebase structure |
 | `$constellation:troubleshooting` | Diagnose Constellation errors, indexing problems, auth issues, and MCP failures |
-| `impact-analysis` | Keyword-triggered guidance before refactoring, renaming, deleting, or moving code |
 
 ### Hooks
 
@@ -37,7 +36,7 @@ Event hooks enable intelligent, transparent assistance:
 | **Session Start** | `SessionStart` | Establishes `code_intel` as the primary tool for code search and navigation |
 | **Pre Tool Use** | `PreToolUse` | Matches `Bash` and, when the command contains `grep`/`rg`/`glob`/`awk`/`findstr`, reminds Codex to prefer `code_intel` for structural queries |
 
-Hooks require Codex hooks to be enabled with `[features].hooks = true`. The older `codex_hooks` alias is deprecated.
+Hooks are on by default (`[features].hooks = false` turns them off). After install, and after any plugin update that changes hooks, open `/hooks` in Codex and trust the Constellation hooks, or they will not run.
 
 ## Installation
 
@@ -54,7 +53,18 @@ Hooks require Codex hooks to be enabled with `[features].hooks = true`. The olde
 codex plugin marketplace add ShiftinBits/constellation-codex
 
 # Install the Constellation Codex plugin
-codex plugin add constellation@constellation-plugins
+codex plugin add constellation@constellation-local
+```
+
+You can also browse and install from the Codex CLI `/plugins` browser or the ChatGPT desktop app Plugins Directory. The Codex IDE extension does not support plugins.
+
+### Reduce approval prompts
+
+Optionally let Codex call the Constellation MCP tools without asking each time. Add this to `~/.codex/config.toml`:
+
+```toml
+[plugins."constellation@constellation-local".mcp_servers.constellation]
+default_tools_approval_mode = "approve"
 ```
 
 ## Usage Examples

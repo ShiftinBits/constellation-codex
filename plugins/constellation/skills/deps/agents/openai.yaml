@@ -1,0 +1,10 @@
+interface:
+  display_name: "Constellation Deps"
+  short_description: "Map what a file imports or what depends on it"
+  default_prompt: "Show what this file imports and what depends on it."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "constellation"
+      description: "Constellation code intelligence MCP server"
+      transport: "stdio"
