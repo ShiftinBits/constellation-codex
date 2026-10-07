@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { SESSION_TEXT } = require('./inject');
+const { MISSING_KEY_MESSAGE, NOT_INDEXED_TEXT, SESSION_TEXT } = require('./inject');
 
 const HOOK = path.join(__dirname, 'inject.js');
 
@@ -44,12 +44,50 @@ for (const name of ['session-start.json', 'subagent-start.json']) {
     assert.strictEqual(runHook({ ...fixture(name), cwd: bare }).stdout, '');
   });
 
-  test(`${event} without an ak: key is silent`, () => {
-    const input = { ...fixture(name), cwd: indexedProject() };
-    assert.strictEqual(runHook(input, { key: '' }).stdout, '');
-    assert.strictEqual(runHook(input, { key: 'sk:test' }).stdout, '');
-  });
+  if (event === 'SubagentStart') {
+    test(`${event} without an ak: key is silent`, () => {
+      const input = { ...fixture(name), cwd: indexedProject() };
+      assert.strictEqual(runHook(input, { key: '' }).stdout, '');
+      assert.strictEqual(runHook(input, { key: 'sk:test' }).stdout, '');
+    });
+  }
 }
+
+test('SessionStart startup without an ak: key emits the setup message', () => {
+  const input = { ...fixture('session-start.json'), source: 'startup', cwd: indexedProject() };
+  for (const key of ['', 'sk:test']) {
+    const result = runHook(input, { key });
+    assert.strictEqual(result.status, 0);
+    assert.deepStrictEqual(JSON.parse(result.stdout), { systemMessage: MISSING_KEY_MESSAGE });
+  }
+  assert.match(MISSING_KEY_MESSAGE, /\$constellation:get-started/);
+});
+
+test('SessionStart on resume, clear, and compact without a key is silent', () => {
+  for (const source of ['resume', 'clear', 'compact']) {
+    const input = { ...fixture('session-start.json'), source, cwd: indexedProject() };
+    assert.strictEqual(runHook(input, { key: '' }).stdout, '');
+  }
+});
+
+test('SessionStart startup in a git repo without constellation.json says the project is not indexed', () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-repo-'));
+  fs.mkdirSync(path.join(repo, '.git'));
+  const nested = path.join(repo, 'src');
+  fs.mkdirSync(nested);
+  const input = { ...fixture('session-start.json'), source: 'startup', cwd: nested };
+  assert.deepStrictEqual(JSON.parse(runHook(input).stdout), {
+    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: NOT_INDEXED_TEXT },
+  });
+  assert.strictEqual(runHook({ ...input, source: 'resume' }).stdout, '');
+});
+
+test('SessionStart startup in an indexed project emits only the session text', () => {
+  const input = { ...fixture('session-start.json'), source: 'startup', cwd: indexedProject() };
+  assert.deepStrictEqual(JSON.parse(runHook(input).stdout), {
+    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: SESSION_TEXT },
+  });
+});
 
 test('other events and malformed stdin are silent', () => {
   const cwd = indexedProject();

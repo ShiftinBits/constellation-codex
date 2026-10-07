@@ -1,0 +1,12 @@
+interface:
+  display_name: "Constellation Get Started"
+  short_description: "Set up Constellation: access key, project config, and indexing"
+  default_prompt: "Help me set up Constellation for this project."
+policy:
+  allow_implicit_invocation: true
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "constellation"
+      description: "Constellation code intelligence MCP server"
+      transport: "stdio"

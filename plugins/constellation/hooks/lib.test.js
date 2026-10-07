@@ -58,6 +58,22 @@ test('projectRoot returns null for missing cwd', () => {
   assert.strictEqual(lib.projectRoot(''), null);
 });
 
+test('gitRoot finds the nearest .git entry walking up', () => {
+  const root = tmpDir();
+  const nested = path.join(root, 'a', 'b');
+  fs.mkdirSync(nested, { recursive: true });
+  assert.strictEqual(lib.gitRoot(nested), null);
+  fs.mkdirSync(path.join(root, '.git'));
+  assert.strictEqual(lib.gitRoot(nested), root);
+  fs.writeFileSync(path.join(root, 'a', '.git'), 'gitdir: elsewhere');
+  assert.strictEqual(lib.gitRoot(nested), path.join(root, 'a'));
+});
+
+test('gitRoot returns null for missing cwd', () => {
+  assert.strictEqual(lib.gitRoot(undefined), null);
+  assert.strictEqual(lib.gitRoot(''), null);
+});
+
 test('contextOutput builds the additionalContext shape', () => {
   assert.deepStrictEqual(lib.contextOutput('SessionStart', 'hi'), {
     hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'hi' },

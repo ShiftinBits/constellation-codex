@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 
 const PROJECT_FILE = 'constellation.json';
+const GIT_ENTRY = '.git';
 const STDIN_DEADLINE_MS = 1000;
 const STATE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -78,6 +79,12 @@ function projectRoot(cwd) {
   return findUp(cwd, PROJECT_FILE);
 }
 
+/** The nearest directory at or above `cwd` holding a .git entry (directory or file), or null. */
+function gitRoot(cwd) {
+  if (typeof cwd !== 'string' || cwd === '') return null;
+  return findUp(cwd, GIT_ENTRY);
+}
+
 function contextOutput(hookEventName, text) {
   return { hookSpecificOutput: { hookEventName, additionalContext: text } };
 }
@@ -147,6 +154,7 @@ module.exports = {
   absolute,
   contextOutput,
   emit,
+  gitRoot,
   isConfigured,
   loadState,
   projectRoot,

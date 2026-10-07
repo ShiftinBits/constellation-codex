@@ -21,6 +21,11 @@
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json",
   "mcpServers": "./.mcp.json",
+  "extensions": {
+    "com.openai": {
+      "onboardingSkill": "./skills/get-started/SKILL.md"
+    }
+  },
   "interface": {
     "displayName": "Constellation",
     "shortDescription": "Code graph intelligence",
