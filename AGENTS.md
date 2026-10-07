@@ -11,6 +11,9 @@ Codex plugin for Constellation code intelligence.
 - `plugins/constellation/skills/*/agents/openai.yaml`: per-skill Codex metadata and invocation policy.
 - `plugins/constellation/hooks/hooks.json`: Codex `SessionStart`, `SubagentStart`, and `PostToolUse` hooks.
 - `plugins/constellation/assets/`: icons.
+- Hook files in `plugins/constellation/hooks/`: `lib.js`, `classify.js`, `inject.js`, `bash.js`, `code-intel.js`, `freshness.js`, with `*.test.js` and `fixtures/` beside them; run `npm test`.
+- Settings are environment variables (for example `CONSTELLATION_NUDGE_LIMIT`) because Codex plugins have no per-plugin user settings.
+- Hook state lives in `PLUGIN_DATA` or `os.tmpdir()/constellation-codex`, pruned after 7 days; hooks fail open within their timeout.
 
 ## Rules
 

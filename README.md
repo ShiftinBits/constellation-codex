@@ -9,7 +9,7 @@ While Constellation's MCP server provides raw code intelligence capabilities, th
 | **Constellation Skills** | `$constellation:` workflows for common code intelligence tasks |
 | **Troubleshooting Skill** | Targeted diagnostics for auth, indexing, API, and MCP failures |
 | **Impact Skill** | Pre-change blast-radius guidance before refactors, renames, or deletions |
-| **Safety Hooks** | Reminders to prefer `code_intel` over text search for structural queries |
+| **Hooks** | Setup checks, session guidance, and reminders to prefer `code_intel` over text search for structural queries |
 
 ## Features
 
@@ -19,6 +19,7 @@ Reusable `$constellation:` skills for structural analysis and plugin diagnostics
 
 | Skill | Description |
 |---------|-------------|
+| `$constellation:get-started` | Set up Constellation: install the CLI, authenticate, initialize, index, and verify |
 | `$constellation:status` | Check API connectivity and project indexing status |
 | `$constellation:diagnose` | Quick health check for connectivity and authentication |
 | `$constellation:impact <symbol> [file]` | Analyze blast radius before changing a symbol |
@@ -33,10 +34,19 @@ Event hooks enable intelligent, transparent assistance:
 
 | Hook | Event | Behavior |
 |------|-------|----------|
-| **Session Start** | `SessionStart` | Establishes `code_intel` as the primary tool for code search and navigation |
-| **Pre Tool Use** | `PreToolUse` | Matches `Bash` and, when the command contains `grep`/`rg`/`glob`/`awk`/`findstr`, reminds Codex to prefer `code_intel` for structural queries |
+| **Session guidance** | `SessionStart` | Establishes `code_intel` as the primary tool for code search and navigation. On startup, tells you when `CONSTELLATION_ACCESS_KEY` is missing or invalid and points to `$constellation:get-started`, and tells Codex when the project is not indexed |
+| **Subagent guidance** | `SubagentStart` | Gives subagents the same `code_intel` guidance |
+| **Symbol search nudge** | `PostToolUse` (`Bash`) | When a shell search such as `grep` or `rg` looks like a symbol lookup in an indexed project, reminds Codex that `code_intel` finds definitions and usages across files |
+| **Freshness note** | `PostToolUse` (`Bash`) | After a git command that moves HEAD (`commit`, `pull`, `checkout`, `merge`, `rebase`), warns once per HEAD when the index is behind your checkout and suggests `constellation index` |
+| **Usage tracking** | `PostToolUse` (`mcp__constellation__code_intel`) | Records that `code_intel` was used so nudges stay quiet for that turn, and remembers which commit the index reflects |
 
-Hooks are on by default (`[features].hooks = false` turns them off). After install, and after any plugin update that changes hooks, open `/hooks` in Codex and trust the Constellation hooks, or they will not run.
+All hooks except the setup check require an `ak:` access key and a `constellation.json` in the project tree, so they stay silent elsewhere. Nudges are limited per session (3 by default, tracked separately for each subagent). Hooks never send source code anywhere; they read only the hook input and local files, and fail open if anything goes wrong.
+
+Hooks are on by default (`[features].hooks = false` turns them off). After install, and after any plugin update that changes hooks, open `/hooks` in Codex and re-trust the Constellation hooks, or they will not run.
+
+### Settings
+
+`CONSTELLATION_NUDGE_LIMIT` sets how many symbol search nudges Codex gets per session (default `3`; `0` disables nudges). Set it in the environment Codex is launched from. Codex plugins have no per-plugin user settings, so environment variables are the settings mechanism.
 
 ## Installation
 
@@ -45,6 +55,8 @@ Hooks are on by default (`[features].hooks = false` turns them off). After insta
 1. **Constellation Account** (see [Constellation](https://app.constellationdev.io))
 2. **Project indexed** in Constellation
 3. **Access key** configured
+
+Not sure where you are? Run `$constellation:get-started` for guided setup.
 
 ### Quick Start
 
@@ -178,12 +190,13 @@ Quick Fix: Run `constellation auth` in your shell.
 | `AUTH_ERROR` | Check `CONSTELLATION_ACCESS_KEY` is set correctly, then run `constellation auth` in your shell |
 | `PROJECT_NOT_INDEXED` | Run `constellation index --full` in your project |
 | Skills not appearing | Restart Codex or check plugin path |
+| Missing key, no `constellation.json`, or hooks not running | Run `$constellation:get-started` |
 
 ## Documentation
 
-- [Constellation Documentation](https://docs.constellationdev.io) — Full platform documentation
-- [MCP Server](https://github.com/shiftinbits/constellation-mcp) — Underlying MCP server
-- [Codex Plugins](https://developers.openai.com/codex) — Plugin development guide
+- [Constellation Documentation](https://docs.constellationdev.io) - Full platform documentation
+- [MCP Server](https://github.com/shiftinbits/constellation-mcp) - Underlying MCP server
+- [Codex Plugins](https://developers.openai.com/codex) - Plugin development guide
 
 ## License
 
