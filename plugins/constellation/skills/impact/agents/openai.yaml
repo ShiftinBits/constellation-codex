@@ -1,0 +1,10 @@
+interface:
+  display_name: "Constellation Impact"
+  short_description: "Blast radius analysis before changing a symbol"
+  default_prompt: "What breaks if I change this symbol? Analyze its impact before I modify it."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "constellation"
+      description: "Constellation code intelligence MCP server"
+      transport: "stdio"

@@ -1,6 +1,6 @@
 ---
 name: status
-description: Use when invoking $constellation:status.
+description: "Use only when the user explicitly invokes $constellation:status. Checks Constellation API connectivity and project indexing status. Not for code search or analysis."
 ---
 
 # Constellation Status

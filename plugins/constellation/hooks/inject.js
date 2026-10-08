@@ -1,49 +1,48 @@
 'use strict';
 
-const SESSION_START_REMINDER =
-  'Use code_intel for structural code questions: definitions, references, callers, dependencies, impact, architecture, and orphaned code. Use local file/text tools for exact strings, config values, logs, docs, file contents, or unindexed projects.';
-const TOOL_USE_REMINDER =
-  'This looks like text search. If you are looking for symbols, references, callers, dependencies, or impact, use code_intel. If you need exact strings, config values, logs, or raw file contents, local search is appropriate.';
+const { contextOutput, emit, gitRoot, hasIndexedChild, isConfigured, projectRoot, pruneStates, readInput } = require('./lib');
 
-const ADDITIONAL_CONTEXT = {
-  SessionStart: SESSION_START_REMINDER,
-  PreToolUse: TOOL_USE_REMINDER,
-  PostToolUse: TOOL_USE_REMINDER,
-};
+const SESSION_TEXT =
+  'Constellation code intelligence is available through the code_intel tool for this project. Prefer code_intel over text search for definitions and details (searchSymbols, getSymbolDetails), usages and callers (traceSymbolUsage, getCallGraph), dependencies and cycles (getDependencies, getDependents, findCircularDependencies), architecture (getArchitectureOverview), and dead code (findOrphanedCode). Run impactAnalysis before editing a shared symbol. Use text search for literal strings, config values, logs, and code the project does not index.';
 
-function isConstellationEnabled() {
-  const accessKey = process.env.CONSTELLATION_ACCESS_KEY || '';
-  return accessKey.startsWith('ak:');
-}
+const EVENTS = new Set(['SessionStart', 'SubagentStart']);
 
-function buildHookOutput(hookEventName) {
-  const additionalContext = ADDITIONAL_CONTEXT[hookEventName];
-  if (!additionalContext) return null;
+const MISSING_KEY_MESSAGE =
+  'Constellation is not set up: CONSTELLATION_ACCESS_KEY is missing or does not start with ak:. Run `constellation auth`, restart Codex, then run $constellation:get-started for the full setup steps.';
 
-  return {
-    hookSpecificOutput: {
-      hookEventName,
-      additionalContext,
-    },
-  };
-}
+const NOT_INDEXED_TEXT =
+  'Constellation is configured, but this project is not indexed (no constellation.json was found). If the user asks structural questions about the code (dependencies, callers, impact, architecture, dead code), suggest running `constellation init` and `constellation index`, or the $constellation:get-started skill. Use text search in the meantime.';
 
-function run(hookEventName) {
-  if (!isConstellationEnabled()) return;
+async function run() {
+  const input = await readInput();
+  const hookEventName = input.hook_event_name;
+  if (!EVENTS.has(hookEventName)) return;
 
-  const output = buildHookOutput(hookEventName);
-  if (!output) return;
+  if (!isConfigured()) {
+    if (hookEventName === 'SessionStart' && input.source === 'startup') {
+      emit({ systemMessage: MISSING_KEY_MESSAGE });
+    }
+    return;
+  }
 
-  process.stdout.write(JSON.stringify(output));
+  if (projectRoot(input.cwd) === null && !hasIndexedChild(input.cwd)) {
+    if (hookEventName === 'SessionStart' && input.source === 'startup' && gitRoot(input.cwd) !== null) {
+      emit(contextOutput(hookEventName, NOT_INDEXED_TEXT));
+    }
+    return;
+  }
+
+  if (hookEventName === 'SessionStart') pruneStates();
+  emit(contextOutput(hookEventName, SESSION_TEXT));
 }
 
 if (require.main === module) {
-  run(process.argv[2]);
+  run().catch(() => {});
 }
 
 module.exports = {
-  ADDITIONAL_CONTEXT,
-  buildHookOutput,
-  isConstellationEnabled,
+  MISSING_KEY_MESSAGE,
+  NOT_INDEXED_TEXT,
+  SESSION_TEXT,
   run,
 };

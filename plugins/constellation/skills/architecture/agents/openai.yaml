@@ -1,0 +1,10 @@
+interface:
+  display_name: "Constellation Architecture"
+  short_description: "Explain codebase structure and hotspots"
+  default_prompt: "Give me an architecture overview of this codebase."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "constellation"
+      description: "Constellation code intelligence MCP server"
+      transport: "stdio"

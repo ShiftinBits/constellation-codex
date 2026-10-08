@@ -1,6 +1,6 @@
 ---
 name: troubleshooting
-description: Use when invoking $constellation:troubleshooting, when the user reports Constellation errors, MCP server failures, indexing problems, authentication issues, or mentions error codes (AUTH_ERROR, PROJECT_NOT_INDEXED, API_UNREACHABLE, SYMBOL_NOT_FOUND).
+description: "Use when the user reports Constellation errors, MCP server failures, indexing problems, authentication issues, or error codes (AUTH_ERROR, PROJECT_NOT_INDEXED, API_UNREACHABLE, SYMBOL_NOT_FOUND), or invokes $constellation:troubleshooting. Not for general code bugs."
 ---
 
 # Constellation Troubleshooting

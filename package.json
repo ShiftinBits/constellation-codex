@@ -1,0 +1,8 @@
+{
+  "name": "constellation-codex",
+  "private": true,
+  "license": "AGPL-3.0",
+  "scripts": {
+    "test": "node --test \"plugins/constellation/hooks/*.test.js\""
+  }
+}
