@@ -25,6 +25,7 @@ Codex plugin for Constellation code intelligence.
 ## Decisions
 
 - MCP server stays on `@constellationdev/mcp@latest`: with a warm npx cache the exact pin and `@latest` start in the same time (median 1.13s each) and both start offline, so pinning gives no startup benefit.
+- Impact hooks reach the code graph through an `mcp_tool` hook on the plugin's own `constellation` MCP server, with `@constellationdev/mcp` returning hook-shaped output: `code_intel`'s `{success, result, ...}` envelope cannot be used directly because Codex hook output is `deny_unknown_fields`, so the envelope fails to parse as hook output on every call (hook marked failed, call never blocked). A direct `code_intel` call through a warm server takes a median 95ms, so the 2 to 3s hook budget is not the constraint.
 
 ## Worktrees
 
