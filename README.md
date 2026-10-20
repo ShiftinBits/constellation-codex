@@ -38,15 +38,26 @@ Event hooks enable intelligent, transparent assistance:
 | **Subagent guidance** | `SubagentStart` | Gives subagents the same `code_intel` guidance |
 | **Symbol search nudge** | `PostToolUse` (`Bash`) | When a shell search such as `grep` or `rg` looks like a symbol lookup in an indexed project, reminds Codex that `code_intel` finds definitions and usages across files |
 | **Freshness note** | `PostToolUse` (`Bash`) | After a git command that moves HEAD (`commit`, `pull`, `checkout`, `merge`, `rebase`), warns once per HEAD when the index is behind your checkout and suggests `constellation index` |
+| **Search augmentation** (opt-in) | `PostToolUse` (`Bash`, `mcp_tool`) | When a shell search looks like a symbol lookup and `CONSTELLATION_AUGMENT_SEARCH` is on, adds where the symbol is defined and how many usages it has |
+| **Impact notice** (opt-in) | `PreToolUse` (`apply_patch\|Edit\|Write`, `mcp_tool`) | When `CONSTELLATION_IMPACT_NOTICE` is on, notes files a patch touches that have many dependents (high or critical risk), with top dependents, used symbols, and test exposure |
+| **PR impact** (opt-in) | `PreToolUse` (`Bash`, `command`) | When `CONSTELLATION_PR_IMPACT=inform`, adds an Impact skeleton to guidance before a `gh pr create` |
 | **Usage tracking** | `PostToolUse` (`mcp__constellation__code_intel`) | Records that `code_intel` was used so nudges stay quiet for that turn, and remembers which commit the index reflects |
 
-All hooks except the setup check require an `ak:` access key and a `constellation.json` in the project tree (or, when Codex starts in a folder above several projects, in one of its subdirectories), so they stay silent elsewhere. Nudges are limited per session (3 by default, tracked separately for each subagent). Hooks never send source code anywhere; they read only the hook input and local files, and fail open if anything goes wrong.
+All hooks except the setup check require an `ak:` access key and a `constellation.json` in the project tree (or, when Codex starts in a folder above several projects, in one of its subdirectories), so they stay silent elsewhere. Nudges are limited per session (3 by default, tracked separately for each subagent). Hooks never send source code anywhere and their output never includes source code; only symbol names and project-relative paths reach the API. They fail open if anything goes wrong.
 
-Hooks are on by default (`[features].hooks = false` turns them off). After install, and after any plugin update that changes hooks, open `/hooks` in Codex and re-trust the Constellation hooks, or they will not run.
+The three opt-in hooks are off by default. The two `mcp_tool` hooks call the `constellation` MCP server's `code_intel` tool in hook mode, so they need an `@constellationdev/mcp` release that supports hook mode. On older servers, and on the first call while the server is still starting, they fail open and show a `Failed` hook row. Do not define a server named `constellation` in your own `config.toml`, because it would shadow the plugin's server and break these hooks.
+
+Hooks are on by default (`[features].hooks = false` turns them off). After install, and after any plugin update, open `/hooks` in Codex and re-trust the Constellation hooks, or they will not run.
 
 ### Settings
 
 `CONSTELLATION_NUDGE_LIMIT` sets how many symbol search nudges Codex gets per session (default `3`; `0` disables nudges). Set it in the environment Codex is launched from. Codex plugins have no per-plugin user settings, so environment variables are the settings mechanism.
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `CONSTELLATION_AUGMENT_SEARCH` | off | `1` or `true` enables search augmentation. The symbol nudge still fires with augmentation on unless `CONSTELLATION_NUDGE_LIMIT=0` |
+| `CONSTELLATION_IMPACT_NOTICE` | off | `1` or `true` enables the impact notice before patches |
+| `CONSTELLATION_PR_IMPACT` | off | `inform` enables the PR impact hook |
 
 ## Installation
 

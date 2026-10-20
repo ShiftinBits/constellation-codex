@@ -9,10 +9,11 @@ Codex plugin for Constellation code intelligence.
 - `plugins/constellation/.mcp.json`: stdio MCP server config.
 - `plugins/constellation/skills/*/SKILL.md`: active `$constellation:*` workflows and skills.
 - `plugins/constellation/skills/*/agents/openai.yaml`: per-skill Codex metadata and invocation policy.
-- `plugins/constellation/hooks/hooks.json`: Codex `SessionStart`, `SubagentStart`, and `PostToolUse` hooks.
+- `plugins/constellation/hooks/hooks.json`: Codex `SessionStart`, `SubagentStart`, `PreToolUse`, and `PostToolUse` hooks.
 - `plugins/constellation/assets/`: icons.
-- Hook files in `plugins/constellation/hooks/`: `lib.js`, `classify.js`, `inject.js`, `bash.js`, `code-intel.js`, `freshness.js`, with `*.test.js` and `fixtures/` beside them; run `npm test`.
+- Hook files in `plugins/constellation/hooks/`: `lib.js`, `classify.js`, `inject.js`, `bash.js`, `code-intel.js`, `freshness.js`, `programs.js`, `primpact.js`, with `*.test.js` and `fixtures/` beside them; run `npm test`.
 - Settings are environment variables (for example `CONSTELLATION_NUDGE_LIMIT`) because Codex plugins have no per-plugin user settings.
+- Each `mcp_tool` `code` literal in `hooks.json` must equal its `PROGRAMS` entry in `programs.js`. Programs stay self-contained (helpers nested inside the function). `programs.test.js` fails on drift and prints the expected literal.
 - Hook state lives in `PLUGIN_DATA` or `os.tmpdir()/constellation-codex`, pruned after 7 days; hooks fail open within their timeout.
 
 ## Rules
