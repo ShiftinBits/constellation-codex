@@ -2,6 +2,7 @@
 
 const { bashSearch, symbolOf } = require('./classify');
 const { freshnessNotice } = require('./freshness');
+const { prImpactFor } = require('./primpact');
 const { absolute, contextOutput, emit, hasIndexedChild, isConfigured, loadState, projectRoot, readInput, saveState } = require('./lib');
 
 const DEFAULT_NUDGE_LIMIT = 3;
@@ -29,11 +30,13 @@ async function run() {
   const notice = freshnessNotice(command, input.cwd, state);
   const base = notice === null ? state : notice.state;
   const nudge = nudgeFor(command, input, base);
+  const afterNudge = nudge === null ? base : nudge.state;
+  const pr = prImpactFor(command, input, afterNudge);
 
-  const next = nudge === null ? base : nudge.state;
+  const next = pr === null ? afterNudge : pr.state;
   if (next !== state) saveState(input.session_id, next, state);
 
-  const text = [notice && notice.context, nudge && nudge.text].filter(Boolean).join('\n\n');
+  const text = [notice && notice.context, nudge && nudge.text, pr && pr.text].filter(Boolean).join('\n\n');
   if (text === '' && !(notice && notice.systemMessage)) return;
   const output = text === '' ? {} : contextOutput('PostToolUse', text);
   if (notice && notice.systemMessage) output.systemMessage = notice.systemMessage;

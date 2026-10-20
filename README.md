@@ -40,12 +40,12 @@ Event hooks enable intelligent, transparent assistance:
 | **Freshness note** | `PostToolUse` (`Bash`) | After a git command that moves HEAD (`commit`, `pull`, `checkout`, `merge`, `rebase`), warns once per HEAD when the index is behind your checkout and suggests `constellation index` |
 | **Search augmentation** (opt-in) | `PostToolUse` (`Bash`, `mcp_tool`) | Once you [add it](#opt-in-hooks), when a shell search looks like a symbol lookup, adds where the symbol is defined and how many usages it has, once per symbol per session |
 | **Impact notice** (opt-in) | `PreToolUse` (`apply_patch\|Edit\|Write`, `mcp_tool`) | Once you [add it](#opt-in-hooks), notes files a patch touches that have many dependents (high or critical risk), with top dependents, used symbols, and test exposure |
-| **PR impact** (opt-in) | `PreToolUse` (`Bash`, `command`) | When `CONSTELLATION_PR_IMPACT=inform`, adds an Impact skeleton to guidance before a `gh pr create` |
+| **PR impact** (opt-in) | `PostToolUse` (`Bash`) | When `CONSTELLATION_PR_IMPACT=inform`, after a `gh pr create` whose body has no Impact section, suggests one listing the project's changed files for Codex to add with `gh pr edit`, once per project and branch |
 | **Usage tracking** | `PostToolUse` (`mcp__constellation__code_intel`) | Records that `code_intel` was used so nudges stay quiet for that turn, and remembers which commit the index reflects |
 
 All hooks except the setup check require an `ak:` access key and a `constellation.json` in the project tree (or, when Codex starts in a folder above several projects, in one of its subdirectories), so they stay silent elsewhere. Nudges are limited per session (3 by default, tracked separately for each subagent). Hooks never send source code to the Constellation API, and their output never includes source code. The two opt-in `mcp_tool` hooks hand the shell command or the full patch text to the local `constellation` MCP server process, which keeps it on your machine; only symbol names and project-relative paths reach the API. Hooks fail open if anything goes wrong.
 
-The PR impact hook is off until you set `CONSTELLATION_PR_IMPACT`. The plugin does not register the search augmentation and impact notice hooks at all, so they cost nothing until you add them yourself (see [Opt-in hooks](#opt-in-hooks)).
+PR impact is off until you set `CONSTELLATION_PR_IMPACT`. It runs inside the existing `PostToolUse` Bash hook, so it adds no hook process of its own. It sees a `gh pr create` only once the command finishes inside Codex's shell yield window (10 seconds by default), so a slow `git push && gh pr create` chain can miss it. The plugin does not register the search augmentation and impact notice hooks at all, so they cost nothing until you add them yourself (see [Opt-in hooks](#opt-in-hooks)).
 
 The impact notice takes patch paths relative to the directory Codex runs in, so it is accurate when Codex starts at the indexed project root (the directory with `constellation.json`). Started from a subdirectory, or from a workspace folder above several projects, it stays silent or undercounts.
 
@@ -79,7 +79,7 @@ The symbol search nudge still fires alongside search augmentation; `CONSTELLATIO
 
 | Variable | Default | Effect |
 |----------|---------|--------|
-| `CONSTELLATION_PR_IMPACT` | off | `inform` enables the PR impact hook |
+| `CONSTELLATION_PR_IMPACT` | off | `inform` enables the PR impact section |
 
 ## Installation
 

@@ -3,7 +3,7 @@
 const fs = require('fs');
 const { ghPrCreate } = require('./classify');
 const { git } = require('./freshness');
-const { absolute, contextOutput, emit, isConfigured, loadState, projectRoot, readInput, saveState } = require('./lib');
+const { absolute, projectRoot } = require('./lib');
 
 const MAX_FILES = 50;
 const BODY_FILE_CAP = 64 * 1024;
@@ -31,25 +31,27 @@ function hasImpactSection(pr, dir) {
 }
 
 /**
- * The current branch and the ref to compare it against, from one git call. The
- * base is the explicit one, else origin's default branch, else main, taken as
- * origin's remote-tracking ref when there is one, since the local branch can
- * be stale or missing, and else as the local branch. Null on a detached HEAD.
+ * The current branch and the ref to compare it against, from two git calls
+ * that name only the refs they need. The base is the explicit one, else
+ * origin's default branch, else main, taken as origin's remote-tracking ref
+ * when there is one, since the local branch can be stale or missing, and else
+ * as the local branch. Null on a detached HEAD.
  */
 function refsOf(pr, dir) {
-  const refs = git(dir, ['for-each-ref', '--format=%(refname)%09%(symref)%09%(HEAD)', 'refs/heads/', ORIGIN]);
-  let branch = null;
+  const head = git(dir, ['rev-parse', '--symbolic-full-name', 'HEAD']);
+  if (!head.startsWith('refs/heads/')) return null;
+  const branch = head.slice('refs/heads/'.length);
+  const wanted = ORIGIN + (pr.base || 'main');
+  const refs = git(dir, ['for-each-ref', '--format=%(refname)%09%(symref)', ORIGIN + 'HEAD', wanted]);
   let originHead = null;
-  const remote = new Set();
+  let hasWanted = false;
   for (const line of refs.split('\n')) {
-    const [ref, symref, head] = line.split('\t');
-    if (head === '*' && ref.startsWith('refs/heads/')) branch = ref.slice('refs/heads/'.length);
-    else if (ref === ORIGIN + 'HEAD') originHead = symref;
-    else if (ref.startsWith(ORIGIN)) remote.add(ref.slice(ORIGIN.length));
+    const [ref, symref] = line.split('\t');
+    if (ref === ORIGIN + 'HEAD') originHead = symref;
+    else if (ref === wanted) hasWanted = true;
   }
-  if (branch === null) return null;
-  const base = pr.base || (originHead && originHead.startsWith(ORIGIN) ? originHead.slice(ORIGIN.length) : 'main');
-  return { branch, base: remote.has(base) ? ORIGIN + base : base };
+  if (!pr.base && originHead && originHead.startsWith(ORIGIN)) return { branch, base: originHead };
+  return { branch, base: hasWanted ? wanted : pr.base || 'main' };
 }
 
 function sectionText(files) {
@@ -66,46 +68,44 @@ function sectionText(files) {
   ].join('\n');
 }
 
-async function run() {
-  if (!isConfigured() || process.env.CONSTELLATION_PR_IMPACT !== 'inform') return;
-
-  const input = await readInput();
-  if (input.tool_name !== 'Bash') return;
-  const command = input.tool_input && input.tool_input.command;
-  if (typeof command !== 'string' || typeof input.cwd !== 'string' || input.cwd === '') return;
+/**
+ * The Impact section to suggest after `command` and the session state it
+ * leaves, or null when none applies. Off unless CONSTELLATION_PR_IMPACT is
+ * `inform`; only a `gh pr create` in an indexed git project whose body has no
+ * Impact heading gets one, once per project and branch. The changed files are
+ * those under the project root, relative to it, as the graph holds them.
+ */
+function prImpactFor(command, input, state) {
+  if (process.env.CONSTELLATION_PR_IMPACT !== 'inform') return null;
   const pr = ghPrCreate(command);
-  if (pr === null) return;
+  if (pr === null) return null;
 
   const dir = pr.dir === undefined ? input.cwd : absolute(pr.dir, input.cwd);
   const root = projectRoot(dir);
-  if (root === null) return;
-  if (hasImpactSection(pr, dir)) return;
+  if (root === null) return null;
+  if (hasImpactSection(pr, dir)) return null;
 
   let refs;
   let files;
   try {
-    refs = refsOf(pr, dir);
-    if (refs === null || refs.base.startsWith('-')) return;
-    // Without renames a moved file lists both paths, and -z keeps paths unquoted.
-    files = git(dir, ['diff', '--name-only', '--no-renames', '-z', `${refs.base}...HEAD`, '--']).split('\0').filter(Boolean);
+    refs = refsOf(pr, root);
+    if (refs === null || refs.base.startsWith('-')) return null;
+    // Without renames a moved file lists both paths, -z keeps paths unquoted,
+    // and --relative keeps only the project's files, relative to its root.
+    files = git(root, ['diff', '--name-only', '--no-renames', '-z', '--relative', `${refs.base}...HEAD`, '--'])
+      .split('\0')
+      .filter(Boolean);
   } catch {
-    return;
+    return null;
   }
-  if (files.length === 0) return;
+  if (files.length === 0) return null;
 
   // Once per project and branch, so another indexed repository on the same
   // branch name in this session still gets its section.
   const key = JSON.stringify([root, refs.branch]);
-  const state = loadState(input.session_id);
   const sent = state.prImpact || {};
-  if (sent[key]) return;
-  saveState(input.session_id, { ...state, prImpact: { ...sent, [key]: true } }, state);
-
-  emit(contextOutput('PreToolUse', sectionText(files)));
+  if (sent[key]) return null;
+  return { text: sectionText(files), state: { ...state, prImpact: { ...sent, [key]: true } } };
 }
 
-if (require.main === module) {
-  run().catch(() => {});
-}
-
-module.exports = { run };
+module.exports = { prImpactFor };

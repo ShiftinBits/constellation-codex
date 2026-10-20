@@ -7,9 +7,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const HOOK = path.join(__dirname, 'primpact.js');
+// The section is part of the PostToolUse Bash hook, so the tests run that hook.
+const HOOK = path.join(__dirname, 'bash.js');
 
-const fixture = () => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'pre-tool-use-gh-pr-create.json'), 'utf8'));
+const fixture = () => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'post-tool-use-gh-pr-create.json'), 'utf8'));
 
 function git(cwd, ...args) {
   execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], {
@@ -57,7 +58,7 @@ const data = () => fs.mkdtempSync(path.join(os.tmpdir(), 'codex-data-'));
 
 test('inform mode gives a ready-to-paste Impact section listing the changed files', () => {
   const out = JSON.parse(call(repo(), 'gh pr create --title T', { data: data() }));
-  assert.strictEqual(out.hookSpecificOutput.hookEventName, 'PreToolUse');
+  assert.strictEqual(out.hookSpecificOutput.hookEventName, 'PostToolUse');
   const text = out.hookSpecificOutput.additionalContext;
   assert.match(text, /^## Impact$/m);
   assert.match(text, /- `src\/a\.js`/);
@@ -125,17 +126,37 @@ test('--base uses the remote-tracking ref when origin has the branch', () => {
   assert.doesNotMatch(text, /upstream\.js/);
 });
 
-test('the hook makes at most two git calls', () => {
+test('the section takes three git calls, none of them a walk of every ref', () => {
   const root = cloneOfOrigin();
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bin-'));
   const log = path.join(bin, 'calls');
   const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
-  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\necho x >> "${log}"\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\necho "$@" >> "${log}"\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
   const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, CONSTELLATION_ACCESS_KEY: 'ak:test', CONSTELLATION_PR_IMPACT: 'inform', PLUGIN_DATA: data() };
   const input = { ...fixture(), cwd: root, tool_input: { command: 'gh pr create' } };
   const result = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(input), env, encoding: 'utf8' });
   assert.match(result.stdout, /a\.js/);
-  assert.strictEqual(fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).length, 2);
+  const calls = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean);
+  assert.strictEqual(calls.length, 3);
+  for (const call of calls) assert.doesNotMatch(call, /refs\/heads\/ |refs\/remotes\/origin\/ /);
+});
+
+test("in a monorepo only the project's files are listed, relative to its root", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-primpact-'));
+  git(root, 'init', '-q', '-b', 'main');
+  fs.writeFileSync(path.join(root, 'README.md'), 'x');
+  git(root, 'add', 'README.md');
+  git(root, 'commit', '-q', '-m', 'base');
+  git(root, 'checkout', '-q', '-b', 'feature');
+  for (const file of ['packages/api/constellation.json', 'packages/api/src/user.ts', 'packages/web/src/page.ts']) {
+    fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+    fs.writeFileSync(path.join(root, file), '{}');
+    git(root, 'add', file);
+  }
+  git(root, 'commit', '-q', '-m', 'change');
+  const text = JSON.parse(call(path.join(root, 'packages', 'api'), 'gh pr create', { data: data() })).hookSpecificOutput.additionalContext;
+  assert.match(text, /^- `src\/user\.ts`$/m);
+  assert.doesNotMatch(text, /packages\/|page\.ts/);
 });
 
 test('a renamed file lists both its old and new path', () => {
