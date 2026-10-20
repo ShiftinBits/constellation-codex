@@ -8,11 +8,12 @@ const vm = require('node:vm');
 
 const { PROGRAMS } = require('./programs');
 
-const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'hooks.json'), 'utf8'));
-const fixture = (name) => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8'));
+const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+const optIn = readJson(path.join(__dirname, 'opt-in-hooks.json'));
+const fixture = (name) => readJson(path.join(__dirname, 'fixtures', name));
 
-/** Every mcp_tool entry in hooks.json with its `<event>:<matcher>` key. */
-function mcpToolEntries() {
+/** Every mcp_tool entry in a hooks file (opt-in-hooks.json by default) with its `<event>:<matcher>` key. */
+function mcpToolEntries(manifest = optIn) {
   const entries = [];
   for (const [event, groups] of Object.entries(manifest.hooks)) {
     for (const group of groups) {
@@ -35,9 +36,9 @@ function deepFreeze(value) {
 /**
  * The `hook` global hook mode builds for `event` from the entry's template:
  * each full-value placeholder replaced by the event field it names (as Codex
- * expands it), and the requested settings resolved from `env`.
+ * expands it). The template requests no settings, so hook mode passes none.
  */
-function hookFor(key, event, env = {}) {
+function hookFor(key, event) {
   const { handler } = mcpToolEntries().find((entry) => entry.key === key);
   const resolve = (value) => {
     if (Array.isArray(value)) return value.map(resolve);
@@ -50,9 +51,7 @@ function hookFor(key, event, env = {}) {
     assert.notStrictEqual(resolved, undefined, `placeholder ${value} is missing from the event`);
     return resolved;
   };
-  const template = resolve(handler.input.hook);
-  const settings = Object.fromEntries(template.settings.map((name) => [name, env[name]]));
-  return deepFreeze({ ...template, settings, once: () => true });
+  return deepFreeze({ ...resolve(handler.input.hook), settings: {}, once: () => true });
 }
 
 /** A stub api whose searchSymbols answers with `answer(params)` and records each call as JSON, as the sandbox sends it. */
@@ -87,19 +86,27 @@ async function run(key, hook, api) {
   return JSON.parse(JSON.stringify(result));
 }
 
-const ON = { CONSTELLATION_AUGMENT_SEARCH: '1' };
-
 function bashEvent(command, extra = {}) {
   return { ...fixture('post-tool-use-bash-search.json'), tool_input: { command }, ...extra };
 }
 
 const userService = { name: 'UserService', kind: 'class', filePath: 'src/user.service.ts', line: 12, usageCount: 7 };
 
+test('the plugin hooks.json registers no mcp_tool hook, so they cost nothing until a user adds them', () => {
+  assert.deepStrictEqual(mcpToolEntries(readJson(path.join(__dirname, 'hooks.json'))), []);
+  const plugin = readJson(path.join(__dirname, '..', '.codex-plugin', 'plugin.json'));
+  assert.strictEqual(plugin.hooks, './hooks/hooks.json');
+});
+
+test('opt-in-hooks.json has only the top-level fields a Codex hooks.json accepts', () => {
+  assert.deepStrictEqual(Object.keys(optIn).sort(), ['description', 'hooks']);
+});
+
 test('every mcp_tool entry runs the PROGRAMS literal for its key', () => {
   const entries = mcpToolEntries();
   for (const { key, handler } of entries) {
     assert.ok(key in PROGRAMS, `no program for ${key}`);
-    assert.strictEqual(handler.input.code, PROGRAMS[key], `hooks.json ${key} code is stale; expected:\n${JSON.stringify(PROGRAMS[key])}`);
+    assert.strictEqual(handler.input.code, PROGRAMS[key], `opt-in-hooks.json ${key} code is stale; expected:\n${JSON.stringify(PROGRAMS[key])}`);
   }
   for (const key of Object.keys(PROGRAMS)) {
     assert.strictEqual(entries.filter((entry) => entry.key === key).length, 1, `program ${key} needs exactly one mcp_tool entry`);
@@ -123,39 +130,20 @@ test('every program literal is under 100 KB and holds no placeholder sequence', 
   }
 });
 
-test('every setting a program reads is passed to the MCP server', () => {
-  const mcp = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '.mcp.json'), 'utf8'));
-  const envVars = mcp.mcpServers.constellation.env_vars;
-  for (const { handler } of mcpToolEntries()) {
-    for (const name of handler.input.hook.settings) assert.ok(envVars.includes(name), `${name} is missing from .mcp.json env_vars`);
-  }
+test('no mcp_tool entry requests settings, since adding the hook is the opt-in', () => {
+  for (const { handler } of mcpToolEntries()) assert.ok(!('settings' in handler.input.hook));
 });
 
 test('the template delivers the Bash command as hook.input.tool_input.command', () => {
-  const hook = hookFor('PostToolUse:Bash', bashEvent('rg UserService'), ON);
+  const hook = hookFor('PostToolUse:Bash', bashEvent('rg UserService'));
   assert.strictEqual(hook.event, 'PostToolUse');
   assert.strictEqual(hook.sessionId, 'sess-abc123');
   assert.deepStrictEqual(hook.input, { tool_name: 'Bash', tool_input: { command: 'rg UserService' }, cwd: '/tmp/example-project' });
 });
 
-for (const value of [undefined, '0', 'false', '']) {
-  test(`augment is off without an api call when CONSTELLATION_AUGMENT_SEARCH is ${JSON.stringify(value)}`, async () => {
-    const { api, calls } = stubApi(() => [userService]);
-    const hook = hookFor('PostToolUse:Bash', bashEvent('rg UserService'), { CONSTELLATION_AUGMENT_SEARCH: value });
-    assert.strictEqual(await run('PostToolUse:Bash', hook, api), null);
-    assert.strictEqual(calls.length, 0);
-  });
-}
-
-test('augment accepts CONSTELLATION_AUGMENT_SEARCH=true', async () => {
-  const { api } = stubApi(() => [userService]);
-  const hook = hookFor('PostToolUse:Bash', bashEvent('rg UserService'), { CONSTELLATION_AUGMENT_SEARCH: 'true' });
-  assert.notStrictEqual(await run('PostToolUse:Bash', hook, api), null);
-});
-
 test('augment ignores a tool other than Bash', async () => {
   const { api, calls } = stubApi(() => [userService]);
-  const hook = hookFor('PostToolUse:Bash', bashEvent('rg UserService', { tool_name: 'apply_patch' }), ON);
+  const hook = hookFor('PostToolUse:Bash', bashEvent('rg UserService', { tool_name: 'apply_patch' }));
   assert.strictEqual(await run('PostToolUse:Bash', hook, api), null);
   assert.strictEqual(calls.length, 0);
 });
@@ -170,7 +158,7 @@ for (const command of [
 ]) {
   test(`augment makes no api call for ${command}`, async () => {
     const { api, calls } = stubApi(() => [userService]);
-    assert.strictEqual(await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent(command), ON), api), null);
+    assert.strictEqual(await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent(command)), api), null);
     assert.strictEqual(calls.length, 0);
   });
 }
@@ -188,7 +176,7 @@ for (const [command, symbol] of [
 ]) {
   test(`augment looks up ${symbol} for ${command}`, async () => {
     const { api, calls } = stubApi(() => []);
-    await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent(command), ON), api);
+    await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent(command)), api);
     assert.ok(calls.length > 0);
     for (const params of calls) assert.strictEqual(params.query, symbol);
   });
@@ -204,7 +192,7 @@ test('augment reports the most used exported exact match', async () => {
         ]
       : [],
   );
-  const result = await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent('rg UserService'), ON), api);
+  const result = await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent('rg UserService')), api);
   assert.deepStrictEqual(result, {
     context:
       '`UserService` (class) defined at `src/user.service.ts:12`, 7 usages. code_intel api.traceSymbolUsage lists every usage.',
@@ -221,7 +209,7 @@ test('augment falls back to a used symbol that is not exported', async () => {
           { name: 'parseLine', kind: 'function', filePath: 'src/parse.ts', line: 30, usageCount: 1 },
         ],
   );
-  const result = await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent('rg parseLine'), ON), api);
+  const result = await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent('rg parseLine')), api);
   assert.deepStrictEqual(result, {
     context: '`parseLine` (function) defined at `src/parse.ts:30`, 1 usage. code_intel api.traceSymbolUsage lists every usage.',
   });
@@ -237,30 +225,27 @@ test('augment returns null with no exact match', async () => {
       ? [{ name: 'UserServiceImpl', kind: 'class', filePath: 'src/impl.ts', line: 3, usageCount: 40 }]
       : [{ ...userService, usageCount: 0 }],
   );
-  assert.strictEqual(await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent('rg UserService'), ON), api), null);
+  assert.strictEqual(await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent('rg UserService')), api), null);
 });
 
 test('augment rejects when the api throws, which hook mode turns into a quiet {}', async () => {
   const { api } = stubApi(() => {
     throw new Error('unavailable');
   });
-  await assert.rejects(run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent('rg UserService'), ON), api), /unavailable/);
+  await assert.rejects(run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent('rg UserService')), api), /unavailable/);
 });
 
 const IMPACT = 'PreToolUse:apply_patch|Edit|Write';
-const IMPACT_ON = { CONSTELLATION_IMPACT_NOTICE: '1' };
 
 function patchEvent(command, extra = {}) {
   return { ...fixture('pre-tool-use-apply-patch.json'), tool_input: { command }, ...extra };
 }
 
-test('the template delivers the patch as hook.input.tool_input.command with the impact setting', () => {
+test('the template delivers the patch as hook.input.tool_input.command', () => {
   const event = fixture('pre-tool-use-apply-patch.json');
-  const hook = hookFor(IMPACT, event, IMPACT_ON);
+  const hook = hookFor(IMPACT, event);
   assert.strictEqual(hook.event, 'PreToolUse');
   assert.strictEqual(hook.sessionId, 'sess-abc123');
-  assert.deepStrictEqual(mcpToolEntries().find((entry) => entry.key === IMPACT).handler.input.hook.settings, ['CONSTELLATION_IMPACT_NOTICE']);
-  assert.deepStrictEqual(hook.settings, IMPACT_ON);
   assert.deepStrictEqual(hook.input, { tool_name: 'apply_patch', tool_input: event.tool_input, cwd: '/tmp/example-project' });
 });
 
@@ -281,7 +266,7 @@ const dependentsList = (count, extra = {}) =>
 
 test('impact reads the paths a patch updates, deletes or moves to and not those it adds', async () => {
   const { api, calls } = dependentsApi(() => []);
-  await run(IMPACT, hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), IMPACT_ON), api);
+  await run(IMPACT, hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json')), api);
   assert.deepStrictEqual(
     calls.map((params) => params.filePath),
     ['src/user.service.ts', 'src/legacy.ts', 'src/old-name.ts', 'src/new-name.ts'],
@@ -303,34 +288,19 @@ test('impact makes paths relative to cwd, dedupes them and skips those outside i
     '*** End Patch',
   ].join('\n');
   const { api, calls } = dependentsApi(() => []);
-  await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
+  await run(IMPACT, hookFor(IMPACT, patchEvent(patch)), api);
   assert.deepStrictEqual(
     calls.map((params) => params.filePath),
     ['src/a.ts', 'src/b.ts'],
   );
 });
 
-for (const value of [undefined, '', '0', 'false', 'yes']) {
-  test(`impact makes no api call when CONSTELLATION_IMPACT_NOTICE is ${JSON.stringify(value)}`, async () => {
-    const { api, calls } = dependentsApi(() => dependentsList(60));
-    const hook = hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), { CONSTELLATION_IMPACT_NOTICE: value });
-    assert.strictEqual(await run(IMPACT, hook, api), null);
-    assert.strictEqual(calls.length, 0);
-  });
-}
-
-test('impact accepts CONSTELLATION_IMPACT_NOTICE=true', async () => {
-  const { api } = dependentsApi(() => dependentsList(20));
-  const hook = hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), { CONSTELLATION_IMPACT_NOTICE: 'true' });
-  assert.notStrictEqual(await run(IMPACT, hook, api), null);
-});
-
 test('impact makes no api call for a patch without paths or a command without text', async () => {
   const { api, calls } = dependentsApi(() => dependentsList(60));
   const onlyAdd = patchEvent('*** Begin Patch\n*** Add File: src/new.ts\n+x\n*** End Patch\n');
-  assert.strictEqual(await run(IMPACT, hookFor(IMPACT, onlyAdd, IMPACT_ON), api), null);
+  assert.strictEqual(await run(IMPACT, hookFor(IMPACT, onlyAdd), api), null);
   const noCommand = { ...fixture('pre-tool-use-apply-patch.json'), tool_input: { file_path: 'src/a.ts' } };
-  assert.strictEqual(await run(IMPACT, hookFor(IMPACT, noCommand, IMPACT_ON), api), null);
+  assert.strictEqual(await run(IMPACT, hookFor(IMPACT, noCommand), api), null);
   assert.strictEqual(calls.length, 0);
 });
 
@@ -341,7 +311,7 @@ test('impact reports a high risk file with its dependents, symbols and tests', a
     { filePath: 'test/user.ts' },
   ]);
   const patch = '*** Begin Patch\n*** Update File: src/user.service.ts\n@@\n*** End Patch\n';
-  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
+  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch)), api);
   assert.strictEqual(result.message, 'src/user.service.ts: high risk, 20 dependents');
   assert.match(result.context, /`src\/user\.service\.ts`: high risk, 20 dependents/);
   assert.match(result.context, /e\.g\. `src\/dep0\.ts`, `src\/dep1\.ts`, `src\/dep2\.ts`;/);
@@ -354,7 +324,7 @@ test('impact reports a high risk file with its dependents, symbols and tests', a
 test('impact reports critical risk and 100+ for a full page', async () => {
   const { api } = dependentsApi(() => dependentsList(100));
   const patch = '*** Begin Patch\n*** Delete File: src/core.ts\n*** End Patch\n';
-  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
+  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch)), api);
   assert.strictEqual(result.message, 'src/core.ts: critical risk, 100+ dependents');
   assert.match(result.context, /critical risk, 100\+ dependents/);
 });
@@ -362,7 +332,7 @@ test('impact reports critical risk and 100+ for a full page', async () => {
 test('impact summarizes several risky files and keeps the message to one line', async () => {
   const { api } = dependentsApi((params) => (params.filePath === 'src/small.ts' ? dependentsList(2) : dependentsList(25)));
   const patch = '*** Update File: src/a.ts\n*** Update File: src/small.ts\n*** Delete File: src/b.ts\n*** Update File: src/c.ts\n';
-  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
+  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch)), api);
   assert.strictEqual(result.message, 'src/a.ts: high risk, 25 dependents (+2 more)');
   assert.doesNotMatch(result.message, /\n/);
   assert.doesNotMatch(result.context, /small\.ts/);
@@ -390,7 +360,7 @@ test('impact keeps the context well under the limit for many large files and lis
   const { api, calls } = dependentsApi(() => Array.from({ length: 100 }, (_, i) => long(i)));
   const patch = Array.from({ length: 100 }, (_, i) => `*** Update File: src/f${i}.ts`).join('\n');
   const { once, keys } = claimingOnce();
-  const result = await run(IMPACT, { ...hookFor(IMPACT, patchEvent(patch), IMPACT_ON), once }, api);
+  const result = await run(IMPACT, { ...hookFor(IMPACT, patchEvent(patch)), once }, api);
   assert.ok(result.context.length <= 6000);
   assert.ok(result.context.endsWith('\n' + IMPACT_FOOTER));
   assert.ok(calls.length <= 50);
@@ -415,7 +385,7 @@ test('impact leaves a file whose line does not fit unclaimed so a later patch re
       .map((line) => line.slice(3, line.indexOf('`', 3)));
 
   const first = claimingOnce(claimed);
-  const firstResult = await run(IMPACT, { ...hookFor(IMPACT, patchEvent(patch), IMPACT_ON), once: first.once }, api);
+  const firstResult = await run(IMPACT, { ...hookFor(IMPACT, patchEvent(patch)), once: first.once }, api);
   assert.ok(firstResult.context.length <= 6000);
   assert.ok(firstResult.context.endsWith('\n' + IMPACT_FOOTER));
   assert.ok(first.keys.length > 0 && first.keys.length < files.length);
@@ -423,7 +393,7 @@ test('impact leaves a file whose line does not fit unclaimed so a later patch re
   assert.ok(firstResult.message.endsWith(' (+' + (first.keys.length - 1) + ' more)'));
 
   const second = claimingOnce(claimed);
-  const secondResult = await run(IMPACT, { ...hookFor(IMPACT, patchEvent(patch), IMPACT_ON), once: second.once }, api);
+  const secondResult = await run(IMPACT, { ...hookFor(IMPACT, patchEvent(patch)), once: second.once }, api);
   assert.ok(secondResult.context.endsWith('\n' + IMPACT_FOOTER));
   assert.deepStrictEqual(listedPaths(secondResult), second.keys.map(pathOfKey));
   assert.deepStrictEqual([...listedPaths(firstResult), ...listedPaths(secondResult)].sort(), [...files].sort());
@@ -433,14 +403,14 @@ test('impact returns null for low and medium risk files', async () => {
   for (const count of [0, 4, 5, 19]) {
     const { api } = dependentsApi(() => dependentsList(count));
     const patch = '*** Update File: src/a.ts\n';
-    assert.strictEqual(await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api), null);
+    assert.strictEqual(await run(IMPACT, hookFor(IMPACT, patchEvent(patch)), api), null);
   }
 });
 
 test('impact skips a file whose once key was already taken', async () => {
   const { api, calls } = dependentsApi(() => dependentsList(30));
   const keys = [];
-  const hook = { ...hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), IMPACT_ON), once: (key) => (keys.push(key), key !== 'impact:src/legacy.ts') };
+  const hook = { ...hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json')), once: (key) => (keys.push(key), key !== 'impact:src/legacy.ts') };
   await run(IMPACT, hook, api);
   assert.deepStrictEqual(keys, ['impact:src/user.service.ts', 'impact:src/legacy.ts', 'impact:src/old-name.ts', 'impact:src/new-name.ts']);
   assert.deepStrictEqual(
@@ -451,7 +421,7 @@ test('impact skips a file whose once key was already taken', async () => {
 
 test('impact returns null when every file was already reported', async () => {
   const { api, calls } = dependentsApi(() => dependentsList(30));
-  const hook = { ...hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), IMPACT_ON), once: () => false };
+  const hook = { ...hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json')), once: () => false };
   assert.strictEqual(await run(IMPACT, hook, api), null);
   assert.strictEqual(calls.length, 0);
 });
@@ -471,7 +441,7 @@ test('impact counts a file that is not in the graph as zero dependents', async (
     if (params.filePath === 'src/user.service.ts') throw sandboxError(params, `File not found: ${params.filePath}`);
     return dependentsList(30);
   });
-  const result = await run(IMPACT, hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), IMPACT_ON), api);
+  const result = await run(IMPACT, hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json')), api);
   assert.doesNotMatch(result.context, /user\.service\.ts/);
   assert.match(result.context, /src\/legacy\.ts/);
 });
@@ -481,7 +451,7 @@ test('impact rejects on another error even when the path reads not-found', async
     throw sandboxError(params, 'Request timed out');
   });
   const patch = '*** Update File: app/not-found.tsx\n';
-  await assert.rejects(run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api), /Request timed out/);
+  await assert.rejects(run(IMPACT, hookFor(IMPACT, patchEvent(patch)), api), /Request timed out/);
 });
 
 test('impact fetches dependents concurrently and lists files in patch order', async () => {
@@ -496,7 +466,7 @@ test('impact fetches dependents concurrently and lists files in patch order', as
     return dependentsList(30);
   });
   const patch = ['src/f0.ts', 'src/f1.ts', 'src/f2.ts', 'src/f3.ts'].map((file) => `*** Update File: ${file}`).join('\n');
-  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
+  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch)), api);
   assert.strictEqual(peak, 4);
   const listed = result.context.split('\n').filter((line) => line.startsWith('- '));
   assert.deepStrictEqual(
@@ -513,7 +483,7 @@ test('impact skips a path whose once key hook mode would reject', async () => {
   assert.strictEqual(('impact:' + atLimit).length, 256);
   const patch = [overLimit, atLimit, 'src/a.ts'].map((file) => `*** Update File: ${file}`).join('\n');
   const { once, keys } = claimingOnce();
-  const result = await run(IMPACT, { ...hookFor(IMPACT, patchEvent(patch), IMPACT_ON), once }, api);
+  const result = await run(IMPACT, { ...hookFor(IMPACT, patchEvent(patch)), once }, api);
   assert.deepStrictEqual(keys, ['impact:' + atLimit, 'impact:src/a.ts']);
   assert.deepStrictEqual(
     calls.map((params) => params.filePath),
@@ -527,13 +497,13 @@ test('impact rejects when the api throws, which hook mode turns into a quiet {}'
   const { api } = dependentsApi(() => {
     throw new Error('unavailable');
   });
-  await assert.rejects(run(IMPACT, hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), IMPACT_ON), api), /unavailable/);
+  await assert.rejects(run(IMPACT, hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json')), api), /unavailable/);
 });
 
 test('impact output holds only context and message and no source text', async () => {
   const { api } = dependentsApi(() => dependentsList(30));
   const patch = '*** Update File: src/a.ts\n@@\n-const secret = 1;\n+const secret = 2;\n';
-  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
+  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch)), api);
   assert.deepStrictEqual(Object.keys(result).sort(), ['context', 'message']);
   assert.doesNotMatch(JSON.stringify(result), /secret/);
 });

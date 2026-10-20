@@ -11,9 +11,8 @@
 /**
  * PostToolUse Bash: when the shell line searches for an identifier-like
  * pattern with grep, egrep, rg, ag, ack or `git grep`, adds one line naming
- * where the symbol is defined and how often it is used. Off unless
- * CONSTELLATION_AUGMENT_SEARCH is `1` or `true`. Returns null when the setting
- * is off, the line runs no symbol search, or no symbol has the exact name.
+ * where the symbol is defined and how often it is used. Returns null when the
+ * line runs no symbol search or no symbol has the exact name.
  */
 async function augment(api, hook) {
   'use strict';
@@ -112,8 +111,6 @@ async function augment(api, hook) {
     return { name: hit.name, kind: hit.kind, filePath: hit.filePath, line: hit.line, usages: hit.usageCount ?? 0 };
   }
 
-  const setting = hook.settings && hook.settings.CONSTELLATION_AUGMENT_SEARCH;
-  if (setting !== '1' && setting !== 'true') return null;
   const input = hook.input;
   if (!input || input.tool_name !== 'Bash') return null;
   const command = input.tool_input && input.tool_input.command;
@@ -136,9 +133,8 @@ async function augment(api, hook) {
  * PreToolUse apply_patch, Edit and Write: names the files the patch updates,
  * deletes or moves to whose direct dependents make a change high or critical
  * risk, with their top dependents, the symbols they use and how many are tests.
- * Off unless CONSTELLATION_IMPACT_NOTICE is `1` or `true`. Returns null when
- * the setting is off or no touched file is high or critical risk. Files added
- * by the patch are ignored, and each file is reported once per session. The
+ * Returns null when no touched file is high or critical risk. Files added by
+ * the patch are ignored, and each file is reported once per session. The
  * context stays within MAX_CONTEXT and always ends with the impactAnalysis
  * instruction: a file line drops its details when they do not fit, and a file
  * whose line cannot fit at all is left for a later patch. Dependents are
@@ -221,8 +217,6 @@ async function impact(api, hook) {
     }
   }
 
-  const setting = hook.settings && hook.settings.CONSTELLATION_IMPACT_NOTICE;
-  if (setting !== '1' && setting !== 'true') return null;
   const input = hook.input;
   if (!input || typeof input.cwd !== 'string') return null;
   const command = input.tool_input && input.tool_input.command;
@@ -296,7 +290,7 @@ function programOf(fn) {
   return `return await (${fn.toString()})(api, hook);`;
 }
 
-/** Program literals by hooks.json `<event>:<matcher>` of their mcp_tool entry. */
+/** Program literals by opt-in-hooks.json `<event>:<matcher>` of their mcp_tool entry. */
 const PROGRAMS = {
   'PostToolUse:Bash': programOf(augment),
   'PreToolUse:apply_patch|Edit|Write': programOf(impact),

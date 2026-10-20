@@ -8,9 +8,7 @@
         "@constellationdev/mcp@latest"
       ],
       "env_vars": [
-        "CONSTELLATION_ACCESS_KEY",
-        "CONSTELLATION_AUGMENT_SEARCH",
-        "CONSTELLATION_IMPACT_NOTICE"
+        "CONSTELLATION_ACCESS_KEY"
       ]
     }
   }
