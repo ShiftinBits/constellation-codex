@@ -86,7 +86,8 @@ async function run() {
   try {
     refs = refsOf(pr, dir);
     if (refs === null || refs.base.startsWith('-')) return;
-    files = git(dir, ['diff', '--name-only', `${refs.base}...HEAD`, '--']).split('\n').filter(Boolean);
+    // Without renames a moved file lists both paths, and -z keeps paths unquoted.
+    files = git(dir, ['diff', '--name-only', '--no-renames', '-z', `${refs.base}...HEAD`, '--']).split('\0').filter(Boolean);
   } catch {
     return;
   }

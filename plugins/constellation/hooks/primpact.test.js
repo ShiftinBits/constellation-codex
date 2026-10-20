@@ -138,6 +138,30 @@ test('the hook makes at most two git calls', () => {
   assert.strictEqual(fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).length, 2);
 });
 
+test('a renamed file lists both its old and new path', () => {
+  const root = repo(['old.js']);
+  git(root, 'checkout', '-q', 'main');
+  git(root, 'merge', '-q', '--ff-only', 'feature');
+  git(root, 'checkout', '-q', '-b', 'rename');
+  git(root, 'mv', 'old.js', 'new.js');
+  git(root, 'commit', '-q', '-m', 'rename');
+  const text = JSON.parse(call(root, 'gh pr create', { data: data() })).hookSpecificOutput.additionalContext;
+  assert.match(text, /^- `old\.js`$/m);
+  assert.match(text, /^- `new\.js`$/m);
+});
+
+test('a non-ASCII path is listed as written, not C-quoted', () => {
+  const text = JSON.parse(call(repo(['src/文件.js', 'src/a b.js']), 'gh pr create', { data: data() })).hookSpecificOutput.additionalContext;
+  assert.match(text, /^- `src\/文件\.js`$/m);
+  assert.match(text, /^- `src\/a b\.js`$/m);
+  assert.doesNotMatch(text, /\\\d{3}/);
+});
+
+test('a chained gh pr create after git push gets the section', () => {
+  const out = call(repo(), 'git push -u origin HEAD && gh pr create --fill', { data: data() });
+  assert.match(out, /src\/a\.js/);
+});
+
 test('--base picks the comparison branch', () => {
   const root = repo();
   git(root, 'branch', 'develop', 'HEAD~1');

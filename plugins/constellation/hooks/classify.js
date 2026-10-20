@@ -177,42 +177,54 @@ const PR_FLAGS = new Map([
   ['-F', 'bodyFile'],
 ]);
 
+/** Flags that make `gh pr create` show help, preview or open a browser instead of creating a PR now. */
+const PR_NO_CREATE_FLAGS = new Set(['--help', '-h', '--dry-run', '--web', '-w']);
+
 /**
- * The `gh pr create` a shell line runs as `{ dir, base, body, bodyFile }`, or
- * null when it runs none. The command is the leading command (after any
- * variable assignments) or the command after a leading `cd <dir> &&`. A `dir`
- * that starts with `~`, `$` or `-`, or holds `$` or a backtick, cannot be
- * resolved from the line, so it never matches. A gh command followed by a pipe
- * is not matched. Flags are read in spaced and `--flag=value` forms; unset
- * fields are undefined.
+ * The `gh pr create` (or its alias `gh pr new`) a shell line runs as
+ * `{ dir, base, body, bodyFile }`, or null when it runs none. Commands joined
+ * to it by `&&` or `;` may run first (`git push && gh pr create`), and each
+ * `cd <dir>` among them sets the directory it runs in. A `cd` that is not one
+ * directory joined by `&&` or `;`, or whose `dir` starts with `~`, `$` or `-`
+ * or holds `$` or a backtick, cannot be resolved from the line, so the line
+ * never matches. A gh command after or before a pipe is not matched, and
+ * neither is one with `--help`, `-h`, `--dry-run` or `--web` (`-w`), which
+ * create no PR now. Flags are read in spaced and `--flag=value` forms; unset fields are
+ * undefined.
  */
 function ghPrCreate(line) {
   const commands = shellCommands(line);
   let dir;
-  let index = 0;
-  let words = withoutAssignments((commands[0] && commands[0].words) || []);
-  if (words[0] === 'cd' && words.length === 2 && commands[0] && commands[0].sep === '&&') {
-    dir = words[1] || '';
-    if (/^[~$-]|[$`]/.test(dir) || dir === '') return null;
-    index = 1;
-    words = withoutAssignments((commands[1] && commands[1].words) || []);
-  }
-  if (words[0] !== 'gh' || words[1] !== 'pr' || words[2] !== 'create') return null;
-  if (commands[index] && commands[index].sep === '|') return null;
-
-  const found = { dir, base: undefined, body: undefined, bodyFile: undefined };
-  const args = words.slice(3);
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i] || '';
-    const eq = arg.indexOf('=');
-    if (eq > 0 && arg.startsWith('--')) {
-      const field = PR_FLAGS.get(arg.slice(0, eq));
-      if (field !== undefined) found[field] = arg.slice(eq + 1);
-    } else if (PR_FLAGS.has(arg)) {
-      found[PR_FLAGS.get(arg)] = args[++i];
+  for (let index = 0; index < commands.length; index++) {
+    const command = commands[index];
+    // A command after a pipe only filters output.
+    if (index > 0 && commands[index - 1].sep === '|') continue;
+    const words = withoutAssignments(command.words);
+    if (words[0] === 'cd') {
+      if (words.length !== 2 || (command.sep !== '&&' && command.sep !== ';')) return null;
+      if (/^[~$-]|[$`]/.test(words[1]) || words[1] === '') return null;
+      dir = under(dir, words[1]);
+      continue;
     }
+    if (words[0] !== 'gh' || words[1] !== 'pr' || (words[2] !== 'create' && words[2] !== 'new')) continue;
+    if (command.sep === '|') return null;
+
+    const found = { dir, base: undefined, body: undefined, bodyFile: undefined };
+    const args = words.slice(3);
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i] || '';
+      const eq = arg.indexOf('=');
+      if (PR_NO_CREATE_FLAGS.has(arg)) return null;
+      if (eq > 0 && arg.startsWith('--')) {
+        const field = PR_FLAGS.get(arg.slice(0, eq));
+        if (field !== undefined) found[field] = arg.slice(eq + 1);
+      } else if (PR_FLAGS.has(arg)) {
+        found[PR_FLAGS.get(arg)] = args[++i];
+      }
+    }
+    return found;
   }
-  return found;
+  return null;
 }
 
 module.exports = {
