@@ -1,0 +1,14 @@
+{
+  "session_id": "sess-abc123",
+  "transcript_path": null,
+  "cwd": "/tmp/example-project",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-5",
+  "permission_mode": "default",
+  "turn_id": "turn-1",
+  "tool_name": "apply_patch",
+  "tool_use_id": "call-7",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Update File: src/user.service.ts\n@@\n-export const a = 1;\n+export const a = 2;\n*** Delete File: src/legacy.ts\n*** Update File: src/old-name.ts\n*** Move to: src/new-name.ts\n@@\n-const b = 1;\n+const b = 2;\n*** Add File: src/created.ts\n+export const c = 3;\n*** End Patch\n"
+  }
+}

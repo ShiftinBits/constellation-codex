@@ -239,3 +239,179 @@ test('augment rejects when the api throws, which hook mode turns into a quiet {}
   });
   await assert.rejects(run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent('rg UserService'), ON), api), /unavailable/);
 });
+
+const IMPACT = 'PreToolUse:apply_patch|Edit|Write';
+const IMPACT_ON = { CONSTELLATION_IMPACT_NOTICE: '1' };
+
+function patchEvent(command, extra = {}) {
+  return { ...fixture('pre-tool-use-apply-patch.json'), tool_input: { command }, ...extra };
+}
+
+/** A stub api whose getDependents answers with `answer(params)` and records each call. */
+function dependentsApi(answer) {
+  const calls = [];
+  const api = Object.freeze({
+    getDependents: async (params) => {
+      calls.push(params);
+      return { directDependents: await answer(params) };
+    },
+  });
+  return { api, calls };
+}
+
+const dependentsList = (count, extra = {}) =>
+  Array.from({ length: count }, (_, i) => ({ filePath: `src/dep${i}.ts`, usedSymbols: [`sym${i}`], ...extra }));
+
+test('impact reads the paths a patch updates, deletes or moves to and not those it adds', async () => {
+  const { api, calls } = dependentsApi(() => []);
+  await run(IMPACT, hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), IMPACT_ON), api);
+  assert.deepStrictEqual(
+    calls.map((params) => params.filePath),
+    ['src/user.service.ts', 'src/legacy.ts', 'src/old-name.ts', 'src/new-name.ts'],
+  );
+  for (const params of calls) assert.deepStrictEqual(Object.keys(params).sort(), ['filePath', 'includeSymbols', 'limit']);
+  assert.ok(calls.every((params) => params.limit === 100 && params.includeSymbols === true));
+});
+
+test('impact makes paths relative to cwd, dedupes them and skips those outside it', async () => {
+  const patch = [
+    '*** Begin Patch',
+    '*** Update File: /tmp/example-project/src/a.ts',
+    '*** Update File: src/./a.ts',
+    '*** Delete File: src/sub/../b.ts',
+    '*** Update File: ../elsewhere/c.ts',
+    '*** Update File: /etc/passwd',
+    '*** Update File: /tmp/example-project-other/d.ts',
+    '*** Add File: src/e.ts',
+    '*** End Patch',
+  ].join('\n');
+  const { api, calls } = dependentsApi(() => []);
+  await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
+  assert.deepStrictEqual(
+    calls.map((params) => params.filePath),
+    ['src/a.ts', 'src/b.ts'],
+  );
+});
+
+for (const value of [undefined, '', '0', 'false', 'yes']) {
+  test(`impact makes no api call when CONSTELLATION_IMPACT_NOTICE is ${JSON.stringify(value)}`, async () => {
+    const { api, calls } = dependentsApi(() => dependentsList(60));
+    const hook = hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), { CONSTELLATION_IMPACT_NOTICE: value });
+    assert.strictEqual(await run(IMPACT, hook, api), null);
+    assert.strictEqual(calls.length, 0);
+  });
+}
+
+test('impact accepts CONSTELLATION_IMPACT_NOTICE=true', async () => {
+  const { api } = dependentsApi(() => dependentsList(20));
+  const hook = hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), { CONSTELLATION_IMPACT_NOTICE: 'true' });
+  assert.notStrictEqual(await run(IMPACT, hook, api), null);
+});
+
+test('impact makes no api call for a patch without paths or a command without text', async () => {
+  const { api, calls } = dependentsApi(() => dependentsList(60));
+  const onlyAdd = patchEvent('*** Begin Patch\n*** Add File: src/new.ts\n+x\n*** End Patch\n');
+  assert.strictEqual(await run(IMPACT, hookFor(IMPACT, onlyAdd, IMPACT_ON), api), null);
+  const noCommand = { ...fixture('pre-tool-use-apply-patch.json'), tool_input: { file_path: 'src/a.ts' } };
+  assert.strictEqual(await run(IMPACT, hookFor(IMPACT, noCommand, IMPACT_ON), api), null);
+  assert.strictEqual(calls.length, 0);
+});
+
+test('impact reports a high risk file with its dependents, symbols and tests', async () => {
+  const { api } = dependentsApi(() => [
+    ...dependentsList(18),
+    { filePath: 'src/user.service.spec.ts', usedSymbols: ['a'] },
+    { filePath: 'test/user.ts' },
+  ]);
+  const patch = '*** Begin Patch\n*** Update File: src/user.service.ts\n@@\n*** End Patch\n';
+  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
+  assert.strictEqual(result.message, 'src/user.service.ts: high risk, 20 dependents');
+  assert.match(result.context, /`src\/user\.service\.ts`: high risk, 20 dependents/);
+  assert.match(result.context, /e\.g\. `src\/dep0\.ts`, `src\/dep1\.ts`, `src\/dep2\.ts`;/);
+  assert.match(result.context, /used symbols: sym0, sym1, sym2, sym3, sym4, sym5, sym6, sym7, sym8, sym9; 2 test dependents/);
+  assert.doesNotMatch(result.context, /sym10/);
+  assert.match(result.context, /api\.impactAnalysis or api\.traceSymbolUsage/);
+  assert.ok(result.context.length < 8000);
+});
+
+test('impact reports critical risk and 100+ for a full page', async () => {
+  const { api } = dependentsApi(() => dependentsList(100));
+  const patch = '*** Begin Patch\n*** Delete File: src/core.ts\n*** End Patch\n';
+  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
+  assert.strictEqual(result.message, 'src/core.ts: critical risk, 100+ dependents');
+  assert.match(result.context, /critical risk, 100\+ dependents/);
+});
+
+test('impact summarizes several risky files and keeps the message to one line', async () => {
+  const { api } = dependentsApi((params) => (params.filePath === 'src/small.ts' ? dependentsList(2) : dependentsList(25)));
+  const patch = '*** Update File: src/a.ts\n*** Update File: src/small.ts\n*** Delete File: src/b.ts\n*** Update File: src/c.ts\n';
+  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
+  assert.strictEqual(result.message, 'src/a.ts: high risk, 25 dependents (+2 more)');
+  assert.doesNotMatch(result.message, /\n/);
+  assert.doesNotMatch(result.context, /small\.ts/);
+});
+
+test('impact keeps the context well under the limit for many large files', async () => {
+  const long = (i) => ({ filePath: `src/${'d'.repeat(150)}${i}.ts`, usedSymbols: Array.from({ length: 30 }, (_, j) => `symbol${i}x${j}`) });
+  const { api, calls } = dependentsApi(() => Array.from({ length: 100 }, (_, i) => long(i)));
+  const patch = Array.from({ length: 100 }, (_, i) => `*** Update File: src/f${i}.ts`).join('\n');
+  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
+  assert.ok(result.context.length < 8000);
+  assert.ok(calls.length <= 50);
+});
+
+test('impact returns null for low and medium risk files', async () => {
+  for (const count of [0, 4, 5, 19]) {
+    const { api } = dependentsApi(() => dependentsList(count));
+    const patch = '*** Update File: src/a.ts\n';
+    assert.strictEqual(await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api), null);
+  }
+});
+
+test('impact skips a file whose once key was already taken', async () => {
+  const { api, calls } = dependentsApi(() => dependentsList(30));
+  const keys = [];
+  const hook = { ...hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), IMPACT_ON), once: (key) => (keys.push(key), key !== 'impact:src/legacy.ts') };
+  await run(IMPACT, hook, api);
+  assert.deepStrictEqual(keys, ['impact:src/user.service.ts', 'impact:src/legacy.ts', 'impact:src/old-name.ts', 'impact:src/new-name.ts']);
+  assert.deepStrictEqual(
+    calls.map((params) => params.filePath),
+    ['src/user.service.ts', 'src/old-name.ts', 'src/new-name.ts'],
+  );
+});
+
+test('impact returns null when every file was already reported', async () => {
+  const { api, calls } = dependentsApi(() => dependentsList(30));
+  const hook = { ...hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), IMPACT_ON), once: () => false };
+  assert.strictEqual(await run(IMPACT, hook, api), null);
+  assert.strictEqual(calls.length, 0);
+});
+
+test('impact counts a file that is not in the graph as zero dependents', async () => {
+  const { api } = dependentsApi((params) => {
+    if (params.filePath === 'src/user.service.ts') {
+      const error = new Error('File not found in the graph: src/user.service.ts');
+      error.code = 'FILE_NOT_FOUND';
+      throw error;
+    }
+    return dependentsList(30);
+  });
+  const result = await run(IMPACT, hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), IMPACT_ON), api);
+  assert.doesNotMatch(result.context, /user\.service\.ts/);
+  assert.match(result.context, /src\/legacy\.ts/);
+});
+
+test('impact rejects when the api throws, which hook mode turns into a quiet {}', async () => {
+  const { api } = dependentsApi(() => {
+    throw new Error('unavailable');
+  });
+  await assert.rejects(run(IMPACT, hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), IMPACT_ON), api), /unavailable/);
+});
+
+test('impact output holds only context and message and no source text', async () => {
+  const { api } = dependentsApi(() => dependentsList(30));
+  const patch = '*** Update File: src/a.ts\n@@\n-const secret = 1;\n+const secret = 2;\n';
+  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
+  assert.deepStrictEqual(Object.keys(result).sort(), ['context', 'message']);
+  assert.doesNotMatch(JSON.stringify(result), /secret/);
+});
