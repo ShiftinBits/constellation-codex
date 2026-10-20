@@ -61,7 +61,8 @@ To turn them on:
    - If you have no user `hooks.json` yet, download the shipped file as it is:
 
      ```bash
-     curl -fsSL https://raw.githubusercontent.com/ShiftinBits/constellation-codex/main/plugins/constellation/hooks/opt-in-hooks.json -o "${CODEX_HOME:-$HOME/.codex}/hooks.json"
+     f="${CODEX_HOME:-$HOME/.codex}/hooks.json"
+     [ -e "$f" ] && echo "$f exists, copy the groups by hand" || curl -fsSL https://raw.githubusercontent.com/ShiftinBits/constellation-codex/main/plugins/constellation/hooks/opt-in-hooks.json -o "$f"
      ```
 
    - If you already have one, copy the `PostToolUse` group with matcher `Bash` (search augmentation) and the `PreToolUse` group with matcher `apply_patch|Edit|Write` (impact notice) from the shipped file into the matching event arrays of yours.
