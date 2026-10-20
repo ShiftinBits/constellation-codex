@@ -25,6 +25,9 @@ Codex plugin for Constellation code intelligence.
 ## Decisions
 
 - MCP server stays on `@constellationdev/mcp@latest`: with a warm npx cache the exact pin and `@latest` start in the same time (median 1.13s each) and both start offline, so pinning gives no startup benefit.
+- Planned impact hooks will be `mcp_tool` hooks on the plugin's own `constellation` server calling `code_intel` (the only MCP tool) with a fixed `code` program and the hook input as a structured argument, using a hook output mode that `@constellationdev/mcp` does not have yet. Today's `code_intel` envelope cannot be hook output because Codex hook output is `deny_unknown_fields`, so every call would fail (never block). A warm call takes a median 95ms; the first call of a session can wait on server start (about 1.1 to 1.5s) inside the hook timeout, then fails open.
+- Plugin layout stays on `.codex-plugin/plugin.json` and `.mcp.json` until a cross-plugin format decision: portable `mcp.json` cannot forward `CONSTELLATION_ACCESS_KEY` (its `env` expands only `${PLUGIN_ROOT}` and `${PLUGIN_DATA}`, Agent Plugins spec 1.0.0 section 9.2), so the overlay with `env_vars` would still be required.
+- Distribution stays marketplace-only: the public directory requires no lifecycle hooks and a remote HTTPS MCP endpoint, but this MCP server must run locally to read `constellation.json` and the git branch (OpenAI plugin submission docs, checked 2026-10-19).
 
 ## Worktrees
 
