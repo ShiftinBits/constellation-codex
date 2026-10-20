@@ -138,7 +138,10 @@ async function augment(api, hook) {
  * risk, with their top dependents, the symbols they use and how many are tests.
  * Off unless CONSTELLATION_IMPACT_NOTICE is `1` or `true`. Returns null when
  * the setting is off or no touched file is high or critical risk. Files added
- * by the patch are ignored, and each file is reported once per session.
+ * by the patch are ignored, and each file is reported once per session. The
+ * context stays within MAX_CONTEXT and always ends with the impactAnalysis
+ * instruction: a file line drops its details when they do not fit, and a file
+ * whose line cannot fit at all is left for a later patch.
  */
 async function impact(api, hook) {
   'use strict';
@@ -226,41 +229,45 @@ async function impact(api, hook) {
     if (rel !== null && !files.includes(rel)) files.push(rel);
   }
 
+  const countOf = (dependents) => (dependents >= 100 ? '100+' : String(dependents));
+  const summaryOf = (path, level, dependents) => '`' + path + '`: ' + level + ' risk, ' + countOf(dependents) + ' dependents';
+
+  const header = 'Constellation: this patch touches files with many dependents.';
+  const footer = 'Before changing behavior, run code_intel api.impactAnalysis or api.traceSymbolUsage on the affected symbols.';
+  const lines = [header];
   const risky = [];
+  // Characters left for file lines, each with its newline.
+  let room = MAX_CONTEXT - header.length - 1 - footer.length;
   for (const path of files.slice(0, MAX_FILES)) {
+    // A file is claimed only while its shortest line still fits, so a file
+    // left out for space stays unclaimed and a later patch reports it.
+    if ('- '.length + summaryOf(path, 'critical', 100).length + 1 > room) continue;
     if (!hook.once('impact:' + path)) continue;
     const dependents = await dependentsOf(path);
     const level = levelOf(dependents.length);
     if (level !== 'high' && level !== 'critical') continue;
-    const used = [...new Set(dependents.flatMap((d) => d.usedSymbols || []))];
-    risky.push({
-      path,
-      level,
-      count: dependents.length,
-      top: dependents.slice(0, 3).map((d) => d.filePath),
-      used: used.slice(0, 10),
-      tests: dependents.filter((d) => isTestFile(d.filePath)).length,
-    });
+    const summary = '- ' + summaryOf(path, level, dependents.length);
+    const top = dependents.slice(0, 3).map((d) => d.filePath);
+    const used = [...new Set(dependents.flatMap((d) => d.usedSymbols || []))].slice(0, 10);
+    const tests = dependents.filter((d) => isTestFile(d.filePath)).length;
+    let line = summary;
+    if (top.length > 0) line += ', e.g. ' + top.map((p) => '`' + p + '`').join(', ');
+    if (used.length > 0) line += '; used symbols: ' + used.join(', ');
+    line += '; ' + tests + (tests === 1 ? ' test dependent' : ' test dependents');
+    if (line.length + 1 > room) line = summary;
+    lines.push(line);
+    room -= line.length + 1;
+    risky.push({ path, level, count: dependents.length });
   }
   if (risky.length === 0) return null;
-
-  const lines = ['Constellation: this patch touches files with many dependents.'];
-  for (const file of risky) {
-    const count = file.count >= 100 ? '100+' : String(file.count);
-    let line = '- `' + file.path + '`: ' + file.level + ' risk, ' + count + ' dependents';
-    if (file.top.length > 0) line += ', e.g. ' + file.top.map((p) => '`' + p + '`').join(', ');
-    if (file.used.length > 0) line += '; used symbols: ' + file.used.join(', ');
-    line += '; ' + file.tests + (file.tests === 1 ? ' test dependent' : ' test dependents');
-    lines.push(line);
-  }
-  lines.push('Before changing behavior, run code_intel api.impactAnalysis or api.traceSymbolUsage on the affected symbols.');
-  let context = lines.join('\n');
-  if (context.length > MAX_CONTEXT) context = context.slice(0, MAX_CONTEXT - 3) + '...';
+  lines.push(footer);
 
   const first = risky[0];
   const more = risky.length > 1 ? ' (+' + (risky.length - 1) + ' more)' : '';
-  const firstCount = first.count >= 100 ? '100+' : String(first.count);
-  return { context, message: first.path + ': ' + first.level + ' risk, ' + firstCount + ' dependents' + more };
+  return {
+    context: lines.join('\n'),
+    message: first.path + ': ' + first.level + ' risk, ' + countOf(first.count) + ' dependents' + more,
+  };
 }
 
 /** The code_intel program that runs `fn` with hook mode's `api` and `hook` globals. */

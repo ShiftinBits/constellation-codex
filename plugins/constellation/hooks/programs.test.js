@@ -351,13 +351,64 @@ test('impact summarizes several risky files and keeps the message to one line', 
   assert.doesNotMatch(result.context, /small\.ts/);
 });
 
-test('impact keeps the context well under the limit for many large files', async () => {
+const IMPACT_FOOTER = 'Before changing behavior, run code_intel api.impactAnalysis or api.traceSymbolUsage on the affected symbols.';
+
+/** A once that claims each key a single time, recording the keys it claims. */
+function claimingOnce(claimed = new Set()) {
+  const keys = [];
+  const once = (key) => {
+    if (claimed.has(key)) return false;
+    claimed.add(key);
+    keys.push(key);
+    return true;
+  };
+  return { once, keys };
+}
+
+const pathOfKey = (key) => key.slice('impact:'.length);
+
+test('impact keeps the context well under the limit for many large files and lists every file it claims', async () => {
   const long = (i) => ({ filePath: `src/${'d'.repeat(150)}${i}.ts`, usedSymbols: Array.from({ length: 30 }, (_, j) => `symbol${i}x${j}`) });
   const { api, calls } = dependentsApi(() => Array.from({ length: 100 }, (_, i) => long(i)));
   const patch = Array.from({ length: 100 }, (_, i) => `*** Update File: src/f${i}.ts`).join('\n');
-  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
-  assert.ok(result.context.length < 8000);
+  const { once, keys } = claimingOnce();
+  const result = await run(IMPACT, { ...hookFor(IMPACT, patchEvent(patch), IMPACT_ON), once }, api);
+  assert.ok(result.context.length <= 6000);
+  assert.ok(result.context.endsWith('\n' + IMPACT_FOOTER));
   assert.ok(calls.length <= 50);
+  assert.strictEqual(calls.length, keys.length);
+  const listed = result.context.split('\n').filter((line) => line.startsWith('- '));
+  assert.strictEqual(listed.length, keys.length);
+  for (const key of keys) assert.ok(result.context.includes('- `' + pathOfKey(key) + '`: critical risk'), `${key} is claimed but not listed`);
+  assert.ok(result.message.endsWith(' (+' + (keys.length - 1) + ' more)'));
+  assert.match(listed[0], /e\.g\. /);
+  assert.doesNotMatch(listed[listed.length - 1], /e\.g\. |used symbols/);
+});
+
+test('impact leaves a file whose line does not fit unclaimed so a later patch reports it', async () => {
+  const { api } = dependentsApi(() => dependentsList(30));
+  const files = Array.from({ length: 20 }, (_, i) => `src/${'p'.repeat(400)}${i}.ts`);
+  const patch = files.map((file) => `*** Update File: ${file}`).join('\n');
+  const claimed = new Set();
+  const listedPaths = (result) =>
+    result.context
+      .split('\n')
+      .filter((line) => line.startsWith('- `'))
+      .map((line) => line.slice(3, line.indexOf('`', 3)));
+
+  const first = claimingOnce(claimed);
+  const firstResult = await run(IMPACT, { ...hookFor(IMPACT, patchEvent(patch), IMPACT_ON), once: first.once }, api);
+  assert.ok(firstResult.context.length <= 6000);
+  assert.ok(firstResult.context.endsWith('\n' + IMPACT_FOOTER));
+  assert.ok(first.keys.length > 0 && first.keys.length < files.length);
+  assert.deepStrictEqual(listedPaths(firstResult), first.keys.map(pathOfKey));
+  assert.ok(firstResult.message.endsWith(' (+' + (first.keys.length - 1) + ' more)'));
+
+  const second = claimingOnce(claimed);
+  const secondResult = await run(IMPACT, { ...hookFor(IMPACT, patchEvent(patch), IMPACT_ON), once: second.once }, api);
+  assert.ok(secondResult.context.endsWith('\n' + IMPACT_FOOTER));
+  assert.deepStrictEqual(listedPaths(secondResult), second.keys.map(pathOfKey));
+  assert.deepStrictEqual([...listedPaths(firstResult), ...listedPaths(secondResult)].sort(), [...files].sort());
 });
 
 test('impact returns null for low and medium risk files', async () => {
