@@ -39,6 +39,34 @@
         ]
       },
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "constellation",
+            "tool": "code_intel",
+            "input": {
+              "code": "return await (async function augment(api, hook) {\n  'use strict';\n  const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;\n  const DECLARATION = /^(?:class|interface|function|def|func|type)\\s+(\\S+)$/;\n  const SEARCH_COMMANDS = ['grep', 'egrep', 'rg', 'ag', 'ack'];\n  const VALUE_FLAGS = ['-A', '-B', '-C', '-m', '-t', '-g', '--type', '--glob'];\n\n  // Splits a shell line at each unquoted `|`, `||`, `;` and `&&` into commands\n  // of words (quotes removed), each with the separator after it.\n  function shellCommands(line) {\n    const commands = [];\n    let words = [];\n    let word = '';\n    let inWord = false;\n    let quote = null;\n    const endWord = () => {\n      if (inWord) words.push(word);\n      word = '';\n      inWord = false;\n    };\n    const endCommand = (sep) => {\n      endWord();\n      commands.push({ words, sep });\n      words = [];\n    };\n    for (let i = 0; i < line.length; i++) {\n      const c = line.charAt(i);\n      const pair = line.slice(i, i + 2);\n      if (quote !== null) {\n        if (c === quote) quote = null;\n        else word += c;\n      } else if (c === \"'\" || c === '\"') {\n        quote = c;\n        inWord = true;\n      } else if (pair === '&&' || pair === '||') {\n        endCommand(pair);\n        i++;\n      } else if (c === '|' || c === ';') {\n        endCommand(c);\n      } else if (/\\s/.test(c)) {\n        endWord();\n      } else {\n        word += c;\n        inWord = true;\n      }\n    }\n    endCommand('');\n    return commands;\n  }\n\n  // The pattern the line's search command looks for: the leading command, or\n  // the one after a leading `cd <dir> &&`. Words after a pipe are not its own.\n  function searchPattern(line) {\n    const commands = shellCommands(line);\n    let words = commands[0].words;\n    if (words[0] === 'cd' && words.length === 2 && commands[0].sep === '&&') words = commands[1].words;\n    let args;\n    if (words[0] === 'git' && words[1] === 'grep') args = words.slice(2);\n    else if (SEARCH_COMMANDS.includes(words[0])) args = words.slice(1);\n    else return null;\n    let pattern;\n    const operands = [];\n    for (let i = 0; i < args.length; i++) {\n      const arg = args[i];\n      if (arg === '-e' || arg === '--regexp') pattern = args[++i];\n      else if (arg.startsWith('--regexp=')) pattern = arg.slice('--regexp='.length);\n      else if (VALUE_FLAGS.includes(arg)) i++;\n      else if (!arg.startsWith('-')) operands.push(arg);\n    }\n    if (pattern === undefined) pattern = operands[0];\n    return pattern === undefined ? null : pattern;\n  }\n\n  // The bare identifier a pattern names: `X`, `class X` (and the other\n  // declaration keywords), `X\\(` or `\\bX\\b`; null for anything else.\n  function symbolOf(pattern) {\n    let text = pattern.trim();\n    const declaration = DECLARATION.exec(text);\n    if (declaration) text = declaration[1];\n    text = text.replace(/^\\\\b/, '').replace(/\\\\b$/, '').replace(/\\\\\\(\\\\\\)$|\\\\\\($/, '');\n    return IDENTIFIER.test(text) ? text : null;\n  }\n\n  // The most used exact-name match, among exported symbols first, then among\n  // used symbols that are not exported; null when nothing matches.\n  async function lookupSymbol(api, name) {\n    const exact = async (isExported) =>\n      (\n        await api.searchSymbols({ query: name, limit: 100, includeUsageCount: true, ...(isExported ? { isExported } : {}) })\n      ).symbols.filter((s) => s.name === name);\n    let hits = await exact(true);\n    if (hits.length === 0) hits = (await exact()).filter((s) => (s.usageCount ?? 0) > 0);\n    const hit = hits.reduce((a, b) => (a === null || (b.usageCount ?? 0) > (a.usageCount ?? 0) ? b : a), null);\n    if (hit === null) return null;\n    return { name: hit.name, kind: hit.kind, filePath: hit.filePath, line: hit.line, usages: hit.usageCount ?? 0 };\n  }\n\n  const setting = hook.settings && hook.settings.CONSTELLATION_AUGMENT_SEARCH;\n  if (setting !== '1' && setting !== 'true') return null;\n  const input = hook.input;\n  if (!input || input.tool_name !== 'Bash') return null;\n  const command = input.tool_input && input.tool_input.command;\n  if (typeof command !== 'string') return null;\n  const pattern = searchPattern(command);\n  const symbol = pattern === null ? null : symbolOf(pattern);\n  if (symbol === null) return null;\n\n  const found = await lookupSymbol(api, symbol);\n  if (found === null) return null;\n  const usages = found.usages + (found.usages === 1 ? ' usage' : ' usages');\n  return {\n    context:\n      '`' + found.name + '` (' + found.kind + ') defined at `' + found.filePath + ':' + found.line + '`, ' + usages +\n      '. code_intel api.traceSymbolUsage lists every usage.',\n  };\n})(api, hook);",
+              "cwd": "${cwd}",
+              "hook": {
+                "event": "PostToolUse",
+                "sessionId": "${session_id}",
+                "input": {
+                  "tool_name": "${tool_name}",
+                  "tool_input": "${tool_input}",
+                  "cwd": "${cwd}"
+                },
+                "settings": [
+                  "CONSTELLATION_AUGMENT_SEARCH"
+                ]
+              }
+            },
+            "statusMessage": "Consulting Constellation...",
+            "timeout": 3
+          }
+        ]
+      },
+      {
         "matcher": "mcp__constellation__code_intel",
         "hooks": [
           {

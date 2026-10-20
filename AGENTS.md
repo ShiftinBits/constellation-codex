@@ -25,6 +25,7 @@ Codex plugin for Constellation code intelligence.
 ## Decisions
 
 - MCP server stays on `@constellationdev/mcp@latest`: with a warm npx cache the exact pin and `@latest` start in the same time (median 1.13s each) and both start offline, so pinning gives no startup benefit.
+- `mcp_tool` hooks (`type`, `server`, `tool`, `input`, `timeout`, `statusMessage`) call `code_intel` with `{"code": <PROGRAMS literal>, "cwd": "${cwd}", "hook": {"event": "<Event>", "sessionId": "${session_id}", "input": {"tool_name": "${tool_name}", "tool_input": "${tool_input}", "cwd": "${cwd}"}, "settings": ["CONSTELLATION_..."]}}`. Verified against openai/codex `982695cd` (`hooks/src/engine/mcp_runner.rs`): placeholders resolve recursively through objects and arrays, a string that is exactly one placeholder keeps the field's JSON type (so `hook.input.tool_input` is the Bash `{ "command": ... }` object), a missing field fails the hook (so only always-present fields are used, never `agent_id`), every `${...}` in any string is expanded (so program code never contains that sequence), and `input` must be representable as TOML (no `null`).
 
 ## Worktrees
 
