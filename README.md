@@ -47,6 +47,8 @@ All hooks except the setup check require an `ak:` access key and a `constellatio
 
 The three opt-in hooks are off by default. The two `mcp_tool` hooks call the `constellation` MCP server's `code_intel` tool in hook mode, so they need an `@constellationdev/mcp` release that supports hook mode. On older servers, and on the first call while the server is still starting, they fail open and show a `Failed` hook row. Do not define a server named `constellation` in your own `config.toml`, because it would shadow the plugin's server and break these hooks.
 
+The impact notice takes patch paths relative to the directory Codex runs in, so it is accurate when Codex starts at the indexed project root (the directory with `constellation.json`). Started from a subdirectory, or from a workspace folder above several projects, it stays silent or undercounts.
+
 Hooks are on by default (`[features].hooks = false` turns them off). After install, and after any plugin update, open `/hooks` in Codex and re-trust the Constellation hooks, or they will not run.
 
 ### Settings

@@ -73,6 +73,71 @@ test('the file list is capped at 50 with a count of the rest', () => {
   assert.strictEqual(text.match(/^- `/gm).length, 50);
 });
 
+test('the fixture command, sent as Codex sends it, gets the section', () => {
+  const root = repo();
+  const env = { ...process.env, CONSTELLATION_ACCESS_KEY: 'ak:test', CONSTELLATION_PR_IMPACT: 'inform', PLUGIN_DATA: data() };
+  const input = { ...fixture(), cwd: root };
+  const result = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(input), env, encoding: 'utf8' });
+  assert.strictEqual(result.status, 0);
+  const text = JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
+  assert.match(text, /^## Impact$/m);
+  assert.match(text, /- `src\/a\.js`/);
+});
+
+/**
+ * A clone of a bare origin whose default branch is trunk, on a feature branch
+ * cut from origin/trunk after upstream.js landed there. The local trunk is
+ * left behind at the first commit, so diffing against it would list upstream.js.
+ */
+function cloneOfOrigin() {
+  const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-origin-'));
+  git(origin, 'init', '-q', '--bare', '-b', 'trunk');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-primpact-'));
+  git(root, 'init', '-q', '-b', 'trunk');
+  git(root, 'remote', 'add', 'origin', origin);
+  fs.writeFileSync(path.join(root, 'constellation.json'), '{}');
+  git(root, 'add', 'constellation.json');
+  git(root, 'commit', '-q', '-m', 'base');
+  fs.writeFileSync(path.join(root, 'upstream.js'), 'x');
+  git(root, 'add', 'upstream.js');
+  git(root, 'commit', '-q', '-m', 'upstream');
+  git(root, 'push', '-q', 'origin', 'trunk');
+  git(root, 'remote', 'set-head', 'origin', 'trunk');
+  git(root, 'checkout', '-q', '-b', 'feature', 'origin/trunk');
+  git(root, 'branch', '-q', '-f', 'trunk', 'trunk~1');
+  fs.writeFileSync(path.join(root, 'a.js'), 'x');
+  git(root, 'add', 'a.js');
+  git(root, 'commit', '-q', '-m', 'change');
+  return root;
+}
+
+test("without --base the diff runs against origin's default branch as origin has it", () => {
+  const root = cloneOfOrigin();
+  const text = JSON.parse(call(root, 'gh pr create', { data: data() })).hookSpecificOutput.additionalContext;
+  assert.match(text, /- `a\.js`/);
+  assert.doesNotMatch(text, /upstream\.js/);
+});
+
+test('--base uses the remote-tracking ref when origin has the branch', () => {
+  const root = cloneOfOrigin();
+  const text = JSON.parse(call(root, 'gh pr create --base trunk', { data: data() })).hookSpecificOutput.additionalContext;
+  assert.match(text, /- `a\.js`/);
+  assert.doesNotMatch(text, /upstream\.js/);
+});
+
+test('the hook makes at most two git calls', () => {
+  const root = cloneOfOrigin();
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bin-'));
+  const log = path.join(bin, 'calls');
+  const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\necho x >> "${log}"\nexec "${realGit}" "$@"\n`, { mode: 0o755 });
+  const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, CONSTELLATION_ACCESS_KEY: 'ak:test', CONSTELLATION_PR_IMPACT: 'inform', PLUGIN_DATA: data() };
+  const input = { ...fixture(), cwd: root, tool_input: { command: 'gh pr create' } };
+  const result = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(input), env, encoding: 'utf8' });
+  assert.match(result.stdout, /a\.js/);
+  assert.strictEqual(fs.readFileSync(log, 'utf8').split('\n').filter(Boolean).length, 2);
+});
+
 test('--base picks the comparison branch', () => {
   const root = repo();
   git(root, 'branch', 'develop', 'HEAD~1');
@@ -100,13 +165,17 @@ test('a non-gh command does no git work', () => {
   const marker = path.join(bin, 'called');
   fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\ntouch "${marker}"\nexit 1\n`, { mode: 0o755 });
   const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, CONSTELLATION_ACCESS_KEY: 'ak:test', CONSTELLATION_PR_IMPACT: 'inform', PLUGIN_DATA: data() };
-  for (const command of ['git status', 'ls', 'gh pr list']) {
+  const send = (command) => {
     const input = { ...fixture(), cwd: root, tool_input: { command } };
     const result = spawnSync(process.execPath, [HOOK], { input: JSON.stringify(input), env, encoding: 'utf8' });
     assert.strictEqual(result.status, 0);
     assert.strictEqual(result.stdout, '');
-  }
+  };
+  for (const command of ['git status', 'ls', 'gh pr list']) send(command);
   assert.strictEqual(fs.existsSync(marker), false);
+  // The same setup reaches git for gh pr create, so the stub would have seen a call.
+  send('gh pr create');
+  assert.strictEqual(fs.existsSync(marker), true);
 });
 
 test('an Impact heading in --body or --body-file gives nothing', () => {
@@ -135,6 +204,18 @@ test('the second call on the same branch gives nothing', () => {
   const dir = data();
   assert.match(call(root, 'gh pr create', { data: dir }), /## Impact/);
   assert.strictEqual(call(root, 'gh pr create', { data: dir }), '');
+});
+
+test('another project on the same branch name in the session still gets its section', () => {
+  const dir = data();
+  assert.match(call(repo(), 'gh pr create', { data: dir }), /## Impact/);
+  assert.match(call(repo(), 'gh pr create', { data: dir }), /## Impact/);
+});
+
+test('a detached HEAD gives nothing', () => {
+  const root = repo();
+  git(root, 'checkout', '-q', '--detach');
+  assert.strictEqual(call(root, 'gh pr create', { data: data() }), '');
 });
 
 test('a git failure gives nothing', () => {
