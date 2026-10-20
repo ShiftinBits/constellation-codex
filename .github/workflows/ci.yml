@@ -28,6 +28,7 @@ jobs:
             "plugins/constellation/.codex-plugin/plugin.json",
             "plugins/constellation/.mcp.json",
             "plugins/constellation/hooks/hooks.json",
+            "plugins/constellation/hooks/opt-in-hooks.json",
             ".agents/plugins/marketplace.json",
           ]) {
             JSON.parse(require("fs").readFileSync(f, "utf8"));

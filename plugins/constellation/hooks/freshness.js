@@ -14,7 +14,8 @@ const COMMIT = /^[0-9a-f]{7,64}$/i;
 const GIT_MOVES = /\bgit\s[^;&|\n]*\b(?:commit|pull|checkout|merge|rebase)\b/;
 
 const GIT = ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', '-c', 'protocol.allow=never'];
-// Two sequential calls must fit inside the 3 s Bash hook timeout, with time left for node startup.
+// The freshness note makes at most two sequential calls and the PR impact section three, which must fit
+// inside the 3 s Bash hook timeout with time left for node startup.
 const GIT_TIMEOUT_MS = 1000;
 
 function isRecord(value) {
@@ -129,5 +130,6 @@ module.exports = {
   GIT_MOVES,
   envelopeOf,
   freshnessNotice,
+  git,
   localState,
 };

@@ -38,15 +38,48 @@ Event hooks enable intelligent, transparent assistance:
 | **Subagent guidance** | `SubagentStart` | Gives subagents the same `code_intel` guidance |
 | **Symbol search nudge** | `PostToolUse` (`Bash`) | When a shell search such as `grep` or `rg` looks like a symbol lookup in an indexed project, reminds Codex that `code_intel` finds definitions and usages across files |
 | **Freshness note** | `PostToolUse` (`Bash`) | After a git command that moves HEAD (`commit`, `pull`, `checkout`, `merge`, `rebase`), warns once per HEAD when the index is behind your checkout and suggests `constellation index` |
+| **Search augmentation** (opt-in) | `PostToolUse` (`Bash`, `mcp_tool`) | Once you [add it](#opt-in-hooks), when a shell search looks like a symbol lookup, adds where the symbol is defined and how many usages it has, once per symbol per session |
+| **Impact notice** (opt-in) | `PreToolUse` (`apply_patch\|Edit\|Write`, `mcp_tool`) | Once you [add it](#opt-in-hooks), notes files a patch touches that have many dependents (high or critical risk), with top dependents, used symbols, and test exposure |
+| **PR impact** (opt-in) | `PostToolUse` (`Bash`) | When `CONSTELLATION_PR_IMPACT=inform`, after a `gh pr create` whose body has no Impact section, suggests one listing the project's changed files for Codex to add with `gh pr edit`, once per project and branch |
 | **Usage tracking** | `PostToolUse` (`mcp__constellation__code_intel`) | Records that `code_intel` was used so nudges stay quiet for that turn, and remembers which commit the index reflects |
 
-All hooks except the setup check require an `ak:` access key and a `constellation.json` in the project tree (or, when Codex starts in a folder above several projects, in one of its subdirectories), so they stay silent elsewhere. Nudges are limited per session (3 by default, tracked separately for each subagent). Hooks never send source code anywhere; they read only the hook input and local files, and fail open if anything goes wrong.
+All hooks except the setup check require an `ak:` access key and a `constellation.json` in the project tree (or, when Codex starts in a folder above several projects, in one of its subdirectories), so they stay silent elsewhere. Nudges are limited per session (3 by default, tracked separately for each subagent). Hooks never send source code to the Constellation API, and their output never includes source code. The two opt-in `mcp_tool` hooks hand the shell command or the full patch text to the local `constellation` MCP server process, which keeps it on your machine; only symbol names and project-relative paths reach the API. Hooks fail open if anything goes wrong.
 
-Hooks are on by default (`[features].hooks = false` turns them off). After install, and after any plugin update that changes hooks, open `/hooks` in Codex and re-trust the Constellation hooks, or they will not run.
+PR impact is off until you set `CONSTELLATION_PR_IMPACT`. It runs inside the existing `PostToolUse` Bash hook, so it adds no hook process of its own. It sees a `gh pr create` only once the command finishes inside Codex's shell yield window (10 seconds by default), so a slow `git push && gh pr create` chain can miss it. The plugin does not register the search augmentation and impact notice hooks at all, so they cost nothing until you add them yourself (see [Opt-in hooks](#opt-in-hooks)).
+
+The impact notice takes patch paths relative to the directory Codex runs in, so it is accurate when Codex starts at the indexed project root (the directory with `constellation.json`). Started from a subdirectory, or from a workspace folder above several projects, it stays silent or undercounts.
+
+Hooks are on by default (`[features].hooks = false` turns them off). After install, and after any plugin update, open `/hooks` in Codex and re-trust the Constellation hooks, or they will not run.
+
+### Opt-in hooks
+
+Search augmentation and the impact notice are `mcp_tool` hooks: on every matching Bash call or patch, Codex calls the `constellation` MCP server's `code_intel` tool in hook mode. The plugin ships them in [`plugins/constellation/hooks/opt-in-hooks.json`](plugins/constellation/hooks/opt-in-hooks.json) but does not load that file. They need an `@constellationdev/mcp` release with hook mode; on a server without it, and on the first call while the server is still starting, they fail open and show a `Failed` hook row.
+
+To turn them on:
+
+1. Add them to your user hooks file, `hooks.json` in your Codex home (`~/.codex`, or `$CODEX_HOME` when set).
+   - If you have no user `hooks.json` yet, download the shipped file as it is:
+
+     ```bash
+     f="${CODEX_HOME:-$HOME/.codex}/hooks.json"
+     [ -e "$f" ] && echo "$f exists, copy the groups by hand" || curl -fsSL https://raw.githubusercontent.com/ShiftinBits/constellation-codex/main/plugins/constellation/hooks/opt-in-hooks.json -o "$f"
+     ```
+
+   - If you already have one, copy the `PostToolUse` group with matcher `Bash` (search augmentation) and the `PreToolUse` group with matcher `apply_patch|Edit|Write` (impact notice) from the shipped file into the matching event arrays of yours.
+
+   Keep only one of the two groups to turn on only that hook. Codex also reads hooks from `[hooks]` tables in `config.toml`; keep your user hooks in one of the two places, since Codex warns when a config folder has both.
+2. Start Codex (restart it if it is running), open `/hooks`, and trust the new hooks. Codex does not run a user hook until you trust it, and asks again whenever the hook changes.
+3. After a plugin update, copy the hooks again to pick up fixes; your copy does not update with the plugin.
+
+The symbol search nudge still fires alongside search augmentation; `CONSTELLATION_NUDGE_LIMIT=0` turns nudges off. Do not define your own MCP server named `constellation` in `config.toml`: the hooks call the server by that name, and yours would take the place of the plugin's.
 
 ### Settings
 
 `CONSTELLATION_NUDGE_LIMIT` sets how many symbol search nudges Codex gets per session (default `3`; `0` disables nudges). Set it in the environment Codex is launched from. Codex plugins have no per-plugin user settings, so environment variables are the settings mechanism.
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `CONSTELLATION_PR_IMPACT` | off | `inform` enables the PR impact section |
 
 ## Installation
 
