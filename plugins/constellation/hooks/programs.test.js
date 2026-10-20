@@ -4,13 +4,12 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const { PROGRAMS } = require('./programs');
 
 const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'hooks.json'), 'utf8'));
 const fixture = (name) => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8'));
-
-const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
 /** Every mcp_tool entry in hooks.json with its `<event>:<matcher>` key. */
 function mcpToolEntries() {
@@ -56,12 +55,12 @@ function hookFor(key, event, env = {}) {
   return deepFreeze({ ...template, settings, once: () => true });
 }
 
-/** A stub api whose searchSymbols answers with `answer(params)` and records each call. */
+/** A stub api whose searchSymbols answers with `answer(params)` and records each call as JSON, as the sandbox sends it. */
 function stubApi(answer = () => []) {
   const calls = [];
   const api = {
     searchSymbols: async (params) => {
-      calls.push(params);
+      calls.push(JSON.parse(JSON.stringify(params)));
       return { symbols: await answer(params) };
     },
   };
@@ -70,14 +69,22 @@ function stubApi(answer = () => []) {
 
 const ADVISORY_KEYS = ['context', 'message'];
 
-/** Runs the program literal for `key` and checks the result is null or advisory output only. */
+/**
+ * Runs the program literal for `key` in a context with no globals but the
+ * language built-ins, so a reference to process, Buffer, console, setTimeout or
+ * require throws. V8 gives every context a console, so it is shadowed: hook
+ * mode only captures console output, which no one reads. The hook is frozen,
+ * as hook mode's is. Checks the result is null or advisory output only and
+ * returns it as JSON, as hook mode passes it on.
+ */
 async function run(key, hook, api) {
-  const result = await new AsyncFunction('api', 'hook', PROGRAMS[key])(api, hook);
-  if (result !== null) {
-    assert.strictEqual(typeof result, 'object');
-    for (const field of Object.keys(result)) assert.ok(ADVISORY_KEYS.includes(field), `unexpected output field ${field}`);
-  }
-  return result;
+  const globals = Object.assign(Object.create(null), { console: undefined });
+  const program = vm.runInNewContext(`(async function (api, hook) {\n${PROGRAMS[key]}\n})`, globals);
+  const result = await program(api, Object.freeze(hook));
+  if (result === null) return null;
+  assert.strictEqual(typeof result, 'object');
+  for (const field of Object.keys(result)) assert.ok(ADVISORY_KEYS.includes(field), `unexpected output field ${field}`);
+  return JSON.parse(JSON.stringify(result));
 }
 
 const ON = { CONSTELLATION_AUGMENT_SEARCH: '1' };
@@ -247,12 +254,22 @@ function patchEvent(command, extra = {}) {
   return { ...fixture('pre-tool-use-apply-patch.json'), tool_input: { command }, ...extra };
 }
 
-/** A stub api whose getDependents answers with `answer(params)` and records each call. */
+test('the template delivers the patch as hook.input.tool_input.command with the impact setting', () => {
+  const event = fixture('pre-tool-use-apply-patch.json');
+  const hook = hookFor(IMPACT, event, IMPACT_ON);
+  assert.strictEqual(hook.event, 'PreToolUse');
+  assert.strictEqual(hook.sessionId, 'sess-abc123');
+  assert.deepStrictEqual(mcpToolEntries().find((entry) => entry.key === IMPACT).handler.input.hook.settings, ['CONSTELLATION_IMPACT_NOTICE']);
+  assert.deepStrictEqual(hook.settings, IMPACT_ON);
+  assert.deepStrictEqual(hook.input, { tool_name: 'apply_patch', tool_input: event.tool_input, cwd: '/tmp/example-project' });
+});
+
+/** A stub api whose getDependents answers with `answer(params)` and records each call as JSON, as the sandbox sends it. */
 function dependentsApi(answer) {
   const calls = [];
   const api = Object.freeze({
     getDependents: async (params) => {
-      calls.push(params);
+      calls.push(JSON.parse(JSON.stringify(params)));
       return { directDependents: await answer(params) };
     },
   });
@@ -353,10 +370,11 @@ test('impact summarizes several risky files and keeps the message to one line', 
 
 const IMPACT_FOOTER = 'Before changing behavior, run code_intel api.impactAnalysis or api.traceSymbolUsage on the affected symbols.';
 
-/** A once that claims each key a single time, recording the keys it claims. */
+/** A once that claims each key a single time, recording the keys it claims, and throws for a key hook mode rejects. */
 function claimingOnce(claimed = new Set()) {
   const keys = [];
   const once = (key) => {
+    if (typeof key !== 'string' || key.length === 0 || key.length > 256) throw new TypeError(`hook.once rejects ${key}`);
     if (claimed.has(key)) return false;
     claimed.add(key);
     keys.push(key);
@@ -387,7 +405,7 @@ test('impact keeps the context well under the limit for many large files and lis
 
 test('impact leaves a file whose line does not fit unclaimed so a later patch reports it', async () => {
   const { api } = dependentsApi(() => dependentsList(30));
-  const files = Array.from({ length: 20 }, (_, i) => `src/${'p'.repeat(400)}${i}.ts`);
+  const files = Array.from({ length: 30 }, (_, i) => `src/${'p'.repeat(230)}${i}.ts`);
   const patch = files.map((file) => `*** Update File: ${file}`).join('\n');
   const claimed = new Set();
   const listedPaths = (result) =>
@@ -438,18 +456,71 @@ test('impact returns null when every file was already reported', async () => {
   assert.strictEqual(calls.length, 0);
 });
 
+/** The error the sandbox throws for a failed api call, wrapping Core's `message`. */
+function sandboxError(params, message) {
+  return new Error(
+    'API call failed: api.getDependents()\n' +
+      `  Parameters: ${JSON.stringify(params)}\n` +
+      '  Duration: 12ms\n' +
+      `  Error: ${message}`,
+  );
+}
+
 test('impact counts a file that is not in the graph as zero dependents', async () => {
   const { api } = dependentsApi((params) => {
-    if (params.filePath === 'src/user.service.ts') {
-      const error = new Error('File not found in the graph: src/user.service.ts');
-      error.code = 'FILE_NOT_FOUND';
-      throw error;
-    }
+    if (params.filePath === 'src/user.service.ts') throw sandboxError(params, `File not found: ${params.filePath}`);
     return dependentsList(30);
   });
   const result = await run(IMPACT, hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json'), IMPACT_ON), api);
   assert.doesNotMatch(result.context, /user\.service\.ts/);
   assert.match(result.context, /src\/legacy\.ts/);
+});
+
+test('impact rejects on another error even when the path reads not-found', async () => {
+  const { api } = dependentsApi((params) => {
+    throw sandboxError(params, 'Request timed out');
+  });
+  const patch = '*** Update File: app/not-found.tsx\n';
+  await assert.rejects(run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api), /Request timed out/);
+});
+
+test('impact fetches dependents concurrently and lists files in patch order', async () => {
+  let inFlight = 0;
+  let peak = 0;
+  const { api } = dependentsApi(async (params) => {
+    inFlight++;
+    peak = Math.max(peak, inFlight);
+    // Later files answer first.
+    await new Promise((resolve) => setTimeout(resolve, 40 - Number(/\d+/.exec(params.filePath)[0]) * 10));
+    inFlight--;
+    return dependentsList(30);
+  });
+  const patch = ['src/f0.ts', 'src/f1.ts', 'src/f2.ts', 'src/f3.ts'].map((file) => `*** Update File: ${file}`).join('\n');
+  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch), IMPACT_ON), api);
+  assert.strictEqual(peak, 4);
+  const listed = result.context.split('\n').filter((line) => line.startsWith('- '));
+  assert.deepStrictEqual(
+    listed.map((line) => line.slice(3, line.indexOf('`', 3))),
+    ['src/f0.ts', 'src/f1.ts', 'src/f2.ts', 'src/f3.ts'],
+  );
+  assert.strictEqual(result.message, 'src/f0.ts: high risk, 30 dependents (+3 more)');
+});
+
+test('impact skips a path whose once key hook mode would reject', async () => {
+  const { api, calls } = dependentsApi(() => dependentsList(30));
+  const atLimit = `src/${'a'.repeat(256 - 'impact:src/'.length - '.ts'.length)}.ts`;
+  const overLimit = `src/${'b'.repeat(256 - 'impact:src/'.length - '.ts'.length + 1)}.ts`;
+  assert.strictEqual(('impact:' + atLimit).length, 256);
+  const patch = [overLimit, atLimit, 'src/a.ts'].map((file) => `*** Update File: ${file}`).join('\n');
+  const { once, keys } = claimingOnce();
+  const result = await run(IMPACT, { ...hookFor(IMPACT, patchEvent(patch), IMPACT_ON), once }, api);
+  assert.deepStrictEqual(keys, ['impact:' + atLimit, 'impact:src/a.ts']);
+  assert.deepStrictEqual(
+    calls.map((params) => params.filePath),
+    [atLimit, 'src/a.ts'],
+  );
+  assert.doesNotMatch(result.context, /bbb/);
+  assert.strictEqual(result.message, `${atLimit}: high risk, 30 dependents (+1 more)`);
 });
 
 test('impact rejects when the api throws, which hook mode turns into a quiet {}', async () => {

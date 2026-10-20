@@ -141,12 +141,15 @@ async function augment(api, hook) {
  * by the patch are ignored, and each file is reported once per session. The
  * context stays within MAX_CONTEXT and always ends with the impactAnalysis
  * instruction: a file line drops its details when they do not fit, and a file
- * whose line cannot fit at all is left for a later patch.
+ * whose line cannot fit at all is left for a later patch. Dependents are
+ * fetched concurrently to stay inside hook mode's time budget.
  */
 async function impact(api, hook) {
   'use strict';
   const MAX_FILES = 40;
   const MAX_CONTEXT = 6000;
+  // hook.once throws for a longer key.
+  const MAX_KEY = 256;
 
   // Ported from the Claude Code plugin's risk levels: untuned cut-offs on the
   // count of direct dependents.
@@ -202,9 +205,11 @@ async function impact(api, hook) {
     return parts.length === 0 ? null : parts.join('/');
   }
 
+  // Core's error for a file the graph does not hold, alone or on the `Error:`
+  // line of the sandbox's wrapped message. Only the start of a line counts, so
+  // a path such as `app/not-found.tsx` echoed in the parameters never does.
   function isNotFound(error) {
-    const text = String((error && error.code) || '') + ' ' + String((error && error.message) || error);
-    return /not[ _-]?found/i.test(text);
+    return /^\s*(?:Error: )?File not found: /m.test(String((error && error.message) || error));
   }
 
   async function dependentsOf(filePath) {
@@ -232,20 +237,38 @@ async function impact(api, hook) {
   const countOf = (dependents) => (dependents >= 100 ? '100+' : String(dependents));
   const summaryOf = (path, level, dependents) => '`' + path + '`: ' + level + ' risk, ' + countOf(dependents) + ' dependents';
 
+  // The longest a file's line can be without details, with its newline.
+  const shortestOf = (path) => '- '.length + summaryOf(path, 'critical', 100).length + 1;
+
   const header = 'Constellation: this patch touches files with many dependents.';
   const footer = 'Before changing behavior, run code_intel api.impactAnalysis or api.traceSymbolUsage on the affected symbols.';
-  const lines = [header];
-  const risky = [];
   // Characters left for file lines, each with its newline.
   let room = MAX_CONTEXT - header.length - 1 - footer.length;
+  // A file is claimed only while its shortest line still fits beside those of
+  // the files claimed before it, so every claimed file can be listed and a
+  // file left out for space stays unclaimed for a later patch.
+  const claimed = [];
   for (const path of files.slice(0, MAX_FILES)) {
-    // A file is claimed only while its shortest line still fits, so a file
-    // left out for space stays unclaimed and a later patch reports it.
-    if ('- '.length + summaryOf(path, 'critical', 100).length + 1 > room) continue;
-    if (!hook.once('impact:' + path)) continue;
-    const dependents = await dependentsOf(path);
-    const level = levelOf(dependents.length);
-    if (level !== 'high' && level !== 'critical') continue;
+    const key = 'impact:' + path;
+    if (key.length > MAX_KEY || shortestOf(path) > room) continue;
+    if (!hook.once(key)) continue;
+    claimed.push(path);
+    room -= shortestOf(path);
+  }
+  const found = await Promise.all(claimed.map(dependentsOf));
+  const risky = [];
+  claimed.forEach((path, i) => {
+    const level = levelOf(found[i].length);
+    if (level === 'high' || level === 'critical') risky.push({ path, level, dependents: found[i] });
+    else room += shortestOf(path);
+  });
+  if (risky.length === 0) return null;
+
+  // In path order, a line keeps its details when they fit in the room left
+  // plus what its shortest line reserved.
+  const lines = [header];
+  for (const { path, level, dependents } of risky) {
+    room += shortestOf(path);
     const summary = '- ' + summaryOf(path, level, dependents.length);
     const top = dependents.slice(0, 3).map((d) => d.filePath);
     const used = [...new Set(dependents.flatMap((d) => d.usedSymbols || []))].slice(0, 10);
@@ -257,16 +280,14 @@ async function impact(api, hook) {
     if (line.length + 1 > room) line = summary;
     lines.push(line);
     room -= line.length + 1;
-    risky.push({ path, level, count: dependents.length });
   }
-  if (risky.length === 0) return null;
   lines.push(footer);
 
   const first = risky[0];
   const more = risky.length > 1 ? ' (+' + (risky.length - 1) + ' more)' : '';
   return {
     context: lines.join('\n'),
-    message: first.path + ': ' + first.level + ' risk, ' + countOf(first.count) + ' dependents' + more,
+    message: first.path + ': ' + first.level + ' risk, ' + countOf(first.dependents.length) + ' dependents' + more,
   };
 }
 
