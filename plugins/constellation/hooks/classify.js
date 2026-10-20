@@ -16,13 +16,16 @@ const KEYWORDS = new Set([
 
 /**
  * Short flags whose value is the next argument. Letters that take no value in
- * grep (`-r`, `-G`, `-T`) are left out even where rg or ag give them one.
+ * grep (`-r`, `-G`, `-T`) are left out even where rg or ag give them one;
+ * RG_VALUE_FLAGS adds rg's own.
  */
 const VALUE_FLAGS = new Set(['-A', '-B', '-C', '-d', '-D', '-f', '-g', '-j', '-m', '-M', '-t']);
+/** Short flags that take a value in rg (replace, type-not, encoding) but none in grep. */
+const RG_VALUE_FLAGS = new Set(['-r', '-T', '-E']);
 const LONG_VALUE_FLAGS = new Set([
   '--after-context', '--before-context', '--context', '--exclude', '--exclude-dir', '--file', '--file-search-regex',
   '--glob', '--iglob', '--ignore-dir', '--include', '--max-columns', '--max-count', '--max-depth', '--replace',
-  '--threads', '--type', '--type-not',
+  '--encoding', '--threads', '--type', '--type-not',
 ]);
 
 /**
@@ -57,8 +60,10 @@ function isSymbolLike(pattern) {
 
 /**
  * Splits a shell line into commands at each unquoted `|`, `||`, `;` and `&&`.
- * Each command holds its words (quotes removed) and the separator after it
- * (`''` at the end of the line).
+ * Each command holds its words (quotes and escapes removed) and the separator
+ * after it (`''` at the end of the line). As in sh, a backslash escapes the
+ * next character outside quotes and `"`, `\\`, `$` or a backtick inside double
+ * quotes, and a backslash before a newline outside quotes joins the lines.
  */
 function shellCommands(line) {
   const commands = [];
@@ -79,9 +84,18 @@ function shellCommands(line) {
   for (let i = 0; i < line.length; i++) {
     const c = line.charAt(i);
     const pair = line.slice(i, i + 2);
-    if (quote !== null) {
+    if (quote === "'") {
       if (c === quote) quote = null;
       else word += c;
+    } else if (quote === '"') {
+      if (c === quote) quote = null;
+      else if (c === '\\' && '"\\$`'.includes(line.charAt(i + 1)) && i + 1 < line.length) word += line.charAt(++i);
+      else word += c;
+    } else if (c === '\\' && i + 1 < line.length) {
+      if (line.charAt(++i) !== '\n') {
+        word += line.charAt(i);
+        inWord = true;
+      }
     } else if (c === "'" || c === '"') {
       quote = c;
       inWord = true;
@@ -134,6 +148,7 @@ function bashSearch(line) {
     dir = words[1];
     words = withoutAssignments((commands[1] && commands[1].words) || []);
   }
+  const valueFlags = words[0] === 'rg' ? (arg) => VALUE_FLAGS.has(arg) || RG_VALUE_FLAGS.has(arg) : (arg) => VALUE_FLAGS.has(arg);
   let args;
   if (words[0] === 'git') {
     let next = 1;
@@ -159,7 +174,7 @@ function bashSearch(line) {
     else if (arg === '--') {
       operands.push(...args.slice(i + 1));
       break;
-    } else if (VALUE_FLAGS.has(arg) || LONG_VALUE_FLAGS.has(arg)) i++;
+    } else if (valueFlags(arg) || LONG_VALUE_FLAGS.has(arg)) i++;
     else if (!arg.startsWith('-')) operands.push(arg);
   }
   if (pattern === undefined) pattern = operands.shift();

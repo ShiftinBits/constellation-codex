@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+const { bashSearch, symbolOf } = require('./classify');
 const { PROGRAMS } = require('./programs');
 
 const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -197,22 +198,47 @@ for (const [command, symbol] of [
   });
 }
 
-test('augment reports the most used exported exact match', async () => {
-  const { api, calls } = stubApi((params) =>
-    params.isExported
-      ? [
-          { name: 'UserServiceImpl', kind: 'class', filePath: 'src/impl.ts', line: 3, usageCount: 40 },
-          { ...userService, filePath: 'src/legacy.ts', usageCount: 2 },
-          userService,
-        ]
-      : [],
-  );
+/**
+ * Search lines on which augment must find the same symbol as the nudge in
+ * classify.js, since augment carries its own copy of the parsing rules.
+ */
+const PARITY = [
+  'grep Foo .', 'grep -rn fooBar src/', 'grep -e fooBar .', 'grep -rn --regexp fooBar .', 'grep --regexp=fooBar .',
+  'grep -A 3 -e fooBar .', 'egrep fooBar .', 'rg AuthService src/', 'ag fooBar', 'ack fooBar', 'git grep fooBar',
+  'git grep -n fooBar -- src', 'grep "connection refused" .', "rg '\\bFoo\\b' src", 'rg "class UserService"',
+  "rg 'a|b' src", 'grep fooBar . | head', 'grep fooBar . ; ls', 'grep fooBar . && ls', 'grep fooBar . || true',
+  'cat log.txt | grep ERROR', 'ls && grep fooBar .', 'echo hi; rg fooBar', 'git log fooBar', 'ls -la', '', 'grep',
+  'grep -rn', 'grep -e', "grep 'unterminated Foo", 'grep -r AuthService .', 'grep -eAuthService .',
+  'rg -t ts AuthService src', 'rg --type ts AuthService', 'rg --type=ts AuthService', "rg -g '*.ts' AuthService",
+  "grep --include '*.ts' -rn AuthService .", 'rg -m 1 AuthService', 'rg -- -dashed src', 'rg -t ts',
+  'LC_ALL=C grep -rn fooBar .', 'FOO=1 BAR=2 rg fooBar', 'rg TODO', 'rg import', 'rg MAX_RETRIES',
+  'rg -r X AuthService src', 'rg -T js AuthService', 'rg -E latin1 AuthService', 'rg --encoding latin1 AuthService',
+  'grep -E Auth src', 'grep -T AuthService src', 'grep "say \\"hi\\" | x" src', 'rg Auth\\Service',
+  'rg \\"AuthService\\"', 'rg \\\n  AuthService src', "grep -rn -e 'createUser\\(' src",
+];
+
+for (const command of PARITY) {
+  test(`augment looks up what classify.js finds for ${JSON.stringify(command)}`, async () => {
+    const { api, calls } = stubApi(() => []);
+    await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent(command)), api);
+    const search = bashSearch(command);
+    assert.strictEqual(calls.length === 0 ? null : calls[0].query, search === null ? null : symbolOf(search.pattern));
+  });
+}
+
+test('augment reports the most used exported exact match from one search', async () => {
+  const { api, calls } = stubApi(() => [
+    { name: 'UserServiceImpl', kind: 'class', filePath: 'src/impl.ts', line: 3, usageCount: 40, isExported: true },
+    { ...userService, filePath: 'src/local.ts', usageCount: 30, isExported: false },
+    { ...userService, filePath: 'src/legacy.ts', usageCount: 2, isExported: true },
+    { ...userService, isExported: true },
+  ]);
   const result = await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent('rg UserService')), api);
   assert.deepStrictEqual(result, {
     context:
       '`UserService` (class) defined at `src/user.service.ts:12`, 7 usages. code_intel api.traceSymbolUsage lists every usage.',
   });
-  assert.deepStrictEqual(calls, [{ query: 'UserService', limit: 100, includeUsageCount: true, isExported: true }]);
+  assert.deepStrictEqual(calls, [{ query: 'UserService', limit: 100, includeUsageCount: true }]);
 });
 
 test('augment reports a symbol once per session and still looks up another', async () => {
@@ -240,30 +266,22 @@ test('augment skips a symbol whose once key hook mode would reject', async () =>
 });
 
 test('augment falls back to a used symbol that is not exported', async () => {
-  const { api, calls } = stubApi((params) =>
-    params.isExported
-      ? []
-      : [
-          { name: 'parseLine', kind: 'function', filePath: 'test/fixture.ts', line: 1, usageCount: 0 },
-          { name: 'parseLine', kind: 'function', filePath: 'src/parse.ts', line: 30, usageCount: 1 },
-        ],
-  );
+  const { api, calls } = stubApi(() => [
+    { name: 'parseLine', kind: 'function', filePath: 'test/fixture.ts', line: 1, usageCount: 0, isExported: false },
+    { name: 'parseLine', kind: 'function', filePath: 'src/parse.ts', line: 30, usageCount: 1, isExported: false },
+  ]);
   const result = await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent('rg parseLine')), api);
   assert.deepStrictEqual(result, {
     context: '`parseLine` (function) defined at `src/parse.ts:30`, 1 usage. code_intel api.traceSymbolUsage lists every usage.',
   });
-  assert.deepStrictEqual(calls, [
-    { query: 'parseLine', limit: 100, includeUsageCount: true, isExported: true },
-    { query: 'parseLine', limit: 100, includeUsageCount: true },
-  ]);
+  assert.deepStrictEqual(calls, [{ query: 'parseLine', limit: 100, includeUsageCount: true }]);
 });
 
 test('augment returns null with no exact match', async () => {
-  const { api } = stubApi((params) =>
-    params.isExported
-      ? [{ name: 'UserServiceImpl', kind: 'class', filePath: 'src/impl.ts', line: 3, usageCount: 40 }]
-      : [{ ...userService, usageCount: 0 }],
-  );
+  const { api } = stubApi(() => [
+    { name: 'UserServiceImpl', kind: 'class', filePath: 'src/impl.ts', line: 3, usageCount: 40, isExported: true },
+    { ...userService, usageCount: 0, isExported: false },
+  ]);
   assert.strictEqual(await run('PostToolUse:Bash', hookFor('PostToolUse:Bash', bashEvent('rg UserService')), api), null);
 });
 

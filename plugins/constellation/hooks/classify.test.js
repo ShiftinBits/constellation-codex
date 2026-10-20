@@ -111,6 +111,18 @@ describe('bashSearch pattern', () => {
     ['git -C /repo/core grep Foo', 'Foo'],
     ['LC_ALL=C grep -rn Foo .', 'Foo'],
     ['FOO=1 BAR=2 rg Foo', 'Foo'],
+    ['rg -r X AuthService src', 'AuthService'],
+    ['rg -T js AuthService', 'AuthService'],
+    ['rg -E latin1 AuthService', 'AuthService'],
+    ['rg --encoding latin1 AuthService', 'AuthService'],
+    ['grep -E Auth src', 'Auth'],
+    ['grep -T AuthService src', 'AuthService'],
+    ['grep "say \\"hi\\" | x" src', 'say "hi" | x'],
+    ['grep "a\\\\" src', 'a\\'],
+    ["grep 'a\\' src", 'a\\'],
+    ['rg Auth\\Service', 'AuthService'],
+    ['rg \\"AuthService\\"', '"AuthService"'],
+    ['rg \\\n  AuthService src', 'AuthService'],
   ];
   for (const [command, expected] of rows) {
     test(`${JSON.stringify(command)} gives ${JSON.stringify(expected)}`, () => {
@@ -177,6 +189,8 @@ describe('ghPrCreate', () => {
     ['cd packages/app && git push && gh pr create', { dir: 'packages/app' }],
     ['git log | head -1 && gh pr create', {}],
     ['gh pr create --body "--web"', { body: '--web' }],
+    ['gh pr create --body "Fixes \\"x\\" | y\n\n## Impact\n- a" -B main', { body: 'Fixes "x" | y\n\n## Impact\n- a', base: 'main' }],
+    ['gh pr create \\\n  --base develop \\\n  --fill', { base: 'develop' }],
   ];
   for (const [line, expected] of rows) {
     test(`reads ${line}`, () => {

@@ -29,18 +29,21 @@ async function augment(api, hook) {
     'static', 'struct', 'super', 'switch', 'this', 'throw', 'true', 'try', 'type', 'typeof', 'undefined', 'using',
     'var', 'void', 'while', 'with', 'yield',
   ];
-  // Flags whose value is the next argument, as in classify.js.
+  // Flags whose value is the next argument, as in classify.js, and the short
+  // flags that take one only in rg.
   const VALUE_FLAGS = [
     '-A', '-B', '-C', '-d', '-D', '-f', '-g', '-j', '-m', '-M', '-t',
     '--after-context', '--before-context', '--context', '--exclude', '--exclude-dir', '--file', '--file-search-regex',
     '--glob', '--iglob', '--ignore-dir', '--include', '--max-columns', '--max-count', '--max-depth', '--replace',
-    '--threads', '--type', '--type-not',
+    '--encoding', '--threads', '--type', '--type-not',
   ];
+  const RG_VALUE_FLAGS = ['-r', '-T', '-E'];
   // hook.once throws for a longer key.
   const MAX_KEY = 256;
 
   // Splits a shell line at each unquoted `|`, `||`, `;` and `&&` into commands
-  // of words (quotes removed), each with the separator after it.
+  // of words (quotes and escapes removed, as in sh), each with the separator
+  // after it.
   function shellCommands(line) {
     const commands = [];
     let words = [];
@@ -60,9 +63,18 @@ async function augment(api, hook) {
     for (let i = 0; i < line.length; i++) {
       const c = line.charAt(i);
       const pair = line.slice(i, i + 2);
-      if (quote !== null) {
+      if (quote === "'") {
         if (c === quote) quote = null;
         else word += c;
+      } else if (quote === '"') {
+        if (c === quote) quote = null;
+        else if (c === '\\' && '"\\$`'.includes(line.charAt(i + 1)) && i + 1 < line.length) word += line.charAt(++i);
+        else word += c;
+      } else if (c === '\\' && i + 1 < line.length) {
+        if (line.charAt(++i) !== '\n') {
+          word += line.charAt(i);
+          inWord = true;
+        }
       } else if (c === "'" || c === '"') {
         quote = c;
         inWord = true;
@@ -104,7 +116,7 @@ async function augment(api, hook) {
       else if (arg === '--') {
         operands.push(...args.slice(i + 1));
         break;
-      } else if (VALUE_FLAGS.includes(arg)) i++;
+      } else if (VALUE_FLAGS.includes(arg) || (words[0] === 'rg' && RG_VALUE_FLAGS.includes(arg))) i++;
       else if (!arg.startsWith('-')) operands.push(arg);
     }
     if (pattern === undefined) pattern = operands[0];
@@ -125,14 +137,14 @@ async function augment(api, hook) {
   }
 
   // The most used exact-name match, among exported symbols first, then among
-  // used symbols that are not exported; null when nothing matches.
+  // used symbols that are not exported; null when nothing matches. One search
+  // serves both, since every result says whether it is exported.
   async function lookupSymbol(api, name) {
-    const exact = async (isExported) =>
-      (
-        await api.searchSymbols({ query: name, limit: 100, includeUsageCount: true, ...(isExported ? { isExported } : {}) })
-      ).symbols.filter((s) => s.name === name);
-    let hits = await exact(true);
-    if (hits.length === 0) hits = (await exact()).filter((s) => (s.usageCount ?? 0) > 0);
+    const exact = (await api.searchSymbols({ query: name, limit: 100, includeUsageCount: true })).symbols.filter(
+      (s) => s.name === name,
+    );
+    let hits = exact.filter((s) => s.isExported);
+    if (hits.length === 0) hits = exact.filter((s) => (s.usageCount ?? 0) > 0);
     const hit = hits.reduce((a, b) => (a === null || (b.usageCount ?? 0) > (a.usageCount ?? 0) ? b : a), null);
     if (hit === null) return null;
     return { name: hit.name, kind: hit.kind, filePath: hit.filePath, line: hit.line, usages: hit.usageCount ?? 0 };
