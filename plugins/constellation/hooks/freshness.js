@@ -129,5 +129,6 @@ module.exports = {
   GIT_MOVES,
   envelopeOf,
   freshnessNotice,
+  git,
   localState,
 };

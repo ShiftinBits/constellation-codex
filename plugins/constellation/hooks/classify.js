@@ -167,8 +167,57 @@ function bashSearch(line) {
   return { pattern, path: under(dir, operands[0]) };
 }
 
+/** The words of a `gh pr create` command's flags that carry a value, by flag name. */
+const PR_FLAGS = new Map([
+  ['--base', 'base'],
+  ['-B', 'base'],
+  ['--body', 'body'],
+  ['-b', 'body'],
+  ['--body-file', 'bodyFile'],
+  ['-F', 'bodyFile'],
+]);
+
+/**
+ * The `gh pr create` a shell line runs as `{ dir, base, body, bodyFile }`, or
+ * null when it runs none. The command is the leading command (after any
+ * variable assignments) or the command after a leading `cd <dir> &&`. A `dir`
+ * that starts with `~`, `$` or `-`, or holds `$` or a backtick, cannot be
+ * resolved from the line, so it never matches. A gh command followed by a pipe
+ * is not matched. Flags are read in spaced and `--flag=value` forms; unset
+ * fields are undefined.
+ */
+function ghPrCreate(line) {
+  const commands = shellCommands(line);
+  let dir;
+  let index = 0;
+  let words = withoutAssignments((commands[0] && commands[0].words) || []);
+  if (words[0] === 'cd' && words.length === 2 && commands[0] && commands[0].sep === '&&') {
+    dir = words[1] || '';
+    if (/^[~$-]|[$`]/.test(dir) || dir === '') return null;
+    index = 1;
+    words = withoutAssignments((commands[1] && commands[1].words) || []);
+  }
+  if (words[0] !== 'gh' || words[1] !== 'pr' || words[2] !== 'create') return null;
+  if (commands[index] && commands[index].sep === '|') return null;
+
+  const found = { dir, base: undefined, body: undefined, bodyFile: undefined };
+  const args = words.slice(3);
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] || '';
+    const eq = arg.indexOf('=');
+    if (eq > 0 && arg.startsWith('--')) {
+      const field = PR_FLAGS.get(arg.slice(0, eq));
+      if (field !== undefined) found[field] = arg.slice(eq + 1);
+    } else if (PR_FLAGS.has(arg)) {
+      found[PR_FLAGS.get(arg)] = args[++i];
+    }
+  }
+  return found;
+}
+
 module.exports = {
   bashSearch,
+  ghPrCreate,
   isSymbolLike,
   symbolOf,
 };

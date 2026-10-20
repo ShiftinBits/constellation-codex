@@ -3,7 +3,7 @@
 const { describe, test } = require('node:test');
 const assert = require('node:assert');
 
-const { bashSearch, isSymbolLike, symbolOf } = require('./classify');
+const { bashSearch, ghPrCreate, isSymbolLike, symbolOf } = require('./classify');
 
 describe('symbolOf', () => {
   const rows = [
@@ -149,6 +149,53 @@ describe('bashSearch path', () => {
   for (const [command, expected] of rows) {
     test(`${JSON.stringify(command)} searches ${JSON.stringify(expected)}`, () => {
       assert.strictEqual(bashSearch(command).path, expected);
+    });
+  }
+});
+
+describe('ghPrCreate', () => {
+  const rows = [
+    ['gh pr create', {}],
+    ['gh pr create --base develop', { base: 'develop' }],
+    ['gh pr create --base=develop', { base: 'develop' }],
+    ['gh pr create -B develop', { base: 'develop' }],
+    ['gh pr create --body "Some text"', { body: 'Some text' }],
+    ['gh pr create --body="Some text"', { body: 'Some text' }],
+    ['gh pr create -b "Some text"', { body: 'Some text' }],
+    ['gh pr create --body-file notes.md', { bodyFile: 'notes.md' }],
+    ['gh pr create --body-file=notes.md', { bodyFile: 'notes.md' }],
+    ['gh pr create -F notes.md', { bodyFile: 'notes.md' }],
+    ['GH_TOKEN=x gh pr create --title "T" -B main', { base: 'main' }],
+    ['cd packages/app && gh pr create -B main', { dir: 'packages/app', base: 'main' }],
+  ];
+  for (const [line, expected] of rows) {
+    test(`reads ${line}`, () => {
+      assert.deepStrictEqual(ghPrCreate(line), {
+        dir: undefined,
+        base: undefined,
+        body: undefined,
+        bodyFile: undefined,
+        ...expected,
+      });
+    });
+  }
+
+  const rejected = [
+    'gh pr create --fill | cat',
+    'gh pr list',
+    'gh pr view 1',
+    'git commit -m "gh pr create"',
+    'echo hi && gh pr create',
+    'cd ~/app && gh pr create',
+    'cd $HOME && gh pr create',
+    'cd -P x && gh pr create',
+    'cd a$b && gh pr create',
+    'cd `pwd` && gh pr create',
+    'ls',
+  ];
+  for (const line of rejected) {
+    test(`null for ${line}`, () => {
+      assert.strictEqual(ghPrCreate(line), null);
     });
   }
 });
