@@ -11,15 +11,33 @@
 /**
  * PostToolUse Bash: when the shell line searches for an identifier-like
  * pattern with grep, egrep, rg, ag, ack or `git grep`, adds one line naming
- * where the symbol is defined and how often it is used. Returns null when the
- * line runs no symbol search or no symbol has the exact name.
+ * where the symbol is defined and how often it is used, once per symbol and
+ * session. Returns null when the line runs no symbol search, the symbol was
+ * already reported, or no symbol has the exact name.
  */
 async function augment(api, hook) {
   'use strict';
   const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
   const DECLARATION = /^(?:class|interface|function|def|func|type)\s+(\S+)$/;
   const SEARCH_COMMANDS = ['grep', 'egrep', 'rg', 'ag', 'ack'];
-  const VALUE_FLAGS = ['-A', '-B', '-C', '-m', '-t', '-g', '--type', '--glob'];
+  // Language keywords: a search for one is a literal text search.
+  const KEYWORDS = [
+    'abstract', 'as', 'async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'def', 'default',
+    'delete', 'do', 'else', 'enum', 'export', 'extends', 'false', 'final', 'finally', 'for', 'from', 'func',
+    'function', 'go', 'if', 'implements', 'import', 'in', 'instanceof', 'interface', 'let', 'namespace', 'new',
+    'nil', 'none', 'null', 'package', 'pass', 'private', 'protected', 'public', 'require', 'return', 'self',
+    'static', 'struct', 'super', 'switch', 'this', 'throw', 'true', 'try', 'type', 'typeof', 'undefined', 'using',
+    'var', 'void', 'while', 'with', 'yield',
+  ];
+  // Flags whose value is the next argument, as in classify.js.
+  const VALUE_FLAGS = [
+    '-A', '-B', '-C', '-d', '-D', '-f', '-g', '-j', '-m', '-M', '-t',
+    '--after-context', '--before-context', '--context', '--exclude', '--exclude-dir', '--file', '--file-search-regex',
+    '--glob', '--iglob', '--ignore-dir', '--include', '--max-columns', '--max-count', '--max-depth', '--replace',
+    '--threads', '--type', '--type-not',
+  ];
+  // hook.once throws for a longer key.
+  const MAX_KEY = 256;
 
   // Splits a shell line at each unquoted `|`, `||`, `;` and `&&` into commands
   // of words (quotes removed), each with the separator after it.
@@ -64,12 +82,14 @@ async function augment(api, hook) {
     return commands;
   }
 
-  // The pattern the line's search command looks for: the leading command, or
-  // the one after a leading `cd <dir> &&`. Words after a pipe are not its own.
+  // The pattern the line's leading search command looks for, after any
+  // variable assignments. Words after a pipe are not its own. A search after
+  // `cd <dir> &&` or in `git -C <dir> grep` runs in another directory, which
+  // the session project's graph may not hold, so it counts as none.
   function searchPattern(line) {
-    const commands = shellCommands(line);
-    let words = commands[0].words;
-    if (words[0] === 'cd' && words.length === 2 && commands[0].sep === '&&') words = commands[1].words;
+    const leading = shellCommands(line)[0].words;
+    const first = leading.findIndex((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
+    const words = first === -1 ? [] : leading.slice(first);
     let args;
     if (words[0] === 'git' && words[1] === 'grep') args = words.slice(2);
     else if (SEARCH_COMMANDS.includes(words[0])) args = words.slice(1);
@@ -80,7 +100,11 @@ async function augment(api, hook) {
       const arg = args[i];
       if (arg === '-e' || arg === '--regexp') pattern = args[++i];
       else if (arg.startsWith('--regexp=')) pattern = arg.slice('--regexp='.length);
-      else if (VALUE_FLAGS.includes(arg)) i++;
+      else if (/^-e./.test(arg)) pattern = arg.slice(2);
+      else if (arg === '--') {
+        operands.push(...args.slice(i + 1));
+        break;
+      } else if (VALUE_FLAGS.includes(arg)) i++;
       else if (!arg.startsWith('-')) operands.push(arg);
     }
     if (pattern === undefined) pattern = operands[0];
@@ -88,13 +112,16 @@ async function augment(api, hook) {
   }
 
   // The bare identifier a pattern names: `X`, `class X` (and the other
-  // declaration keywords), `X\(` or `\bX\b`; null for anything else.
+  // declaration keywords), `X\(` or `\bX\b`; null for anything else. A
+  // word with no lowercase letter (`TODO`, `MAX_RETRIES`, an access key id)
+  // is a marker or constant and a keyword is literal text, so neither counts.
   function symbolOf(pattern) {
     let text = pattern.trim();
     const declaration = DECLARATION.exec(text);
     if (declaration) text = declaration[1];
     text = text.replace(/^\\b/, '').replace(/\\b$/, '').replace(/\\\(\\\)$|\\\($/, '');
-    return IDENTIFIER.test(text) ? text : null;
+    if (!IDENTIFIER.test(text) || !/[a-z]/.test(text) || KEYWORDS.includes(text)) return null;
+    return text;
   }
 
   // The most used exact-name match, among exported symbols first, then among
@@ -118,6 +145,9 @@ async function augment(api, hook) {
   const pattern = searchPattern(command);
   const symbol = pattern === null ? null : symbolOf(pattern);
   if (symbol === null) return null;
+  // Once per symbol and session.
+  const key = 'augment:' + symbol;
+  if (key.length > MAX_KEY || !hook.once(key)) return null;
 
   const found = await lookupSymbol(api, symbol);
   if (found === null) return null;
@@ -138,12 +168,15 @@ async function augment(api, hook) {
  * context stays within MAX_CONTEXT and always ends with the impactAnalysis
  * instruction: a file line drops its details when they do not fit, and a file
  * whose line cannot fit at all is left for a later patch. Dependents are
- * fetched concurrently to stay inside hook mode's time budget.
+ * fetched concurrently to stay inside hook mode's time budget, and a file whose
+ * lookup fails is left out without dropping the others.
  */
 async function impact(api, hook) {
   'use strict';
   const MAX_FILES = 40;
   const MAX_CONTEXT = 6000;
+  // getDependents' page size: a full page means there may be more.
+  const PAGE = 100;
   // hook.once throws for a longer key.
   const MAX_KEY = 256;
 
@@ -170,11 +203,12 @@ async function impact(api, hook) {
     );
   }
 
-  // The paths a patch updates, deletes or moves to; `*** Add File:` is ignored.
+  // The paths a patch updates, deletes or moves to, headers indented or not;
+  // `*** Add File:` is ignored.
   function patchPaths(patch) {
     const paths = [];
     for (const line of patch.split(/\r?\n/)) {
-      const match = /^\*\*\* (?:Update File|Delete File|Move to): (.+?)\s*$/.exec(line);
+      const match = /^\s*\*\*\* (?:Update File|Delete File|Move to): (.+?)\s*$/.exec(line);
       if (match) paths.push(match[1]);
     }
     return paths;
@@ -201,19 +235,14 @@ async function impact(api, hook) {
     return parts.length === 0 ? null : parts.join('/');
   }
 
-  // Core's error for a file the graph does not hold, alone or on the `Error:`
-  // line of the sandbox's wrapped message. Only the start of a line counts, so
-  // a path such as `app/not-found.tsx` echoed in the parameters never does.
-  function isNotFound(error) {
-    return /^\s*(?:Error: )?File not found: /m.test(String((error && error.message) || error));
-  }
-
+  // The file's direct dependents, or null when the lookup fails: a file the
+  // graph does not hold, an extension the project does not index (README.md,
+  // package.json) or any other error skips only that file.
   async function dependentsOf(filePath) {
     try {
-      return (await api.getDependents({ filePath, limit: 100, includeSymbols: true })).directDependents || [];
-    } catch (error) {
-      if (isNotFound(error)) return [];
-      throw error;
+      return (await api.getDependents({ filePath, limit: PAGE, includeSymbols: true })).directDependents || [];
+    } catch {
+      return null;
     }
   }
 
@@ -228,11 +257,11 @@ async function impact(api, hook) {
     if (rel !== null && !files.includes(rel)) files.push(rel);
   }
 
-  const countOf = (dependents) => (dependents >= 100 ? '100+' : String(dependents));
+  const countOf = (dependents) => (dependents >= PAGE ? PAGE + '+' : String(dependents));
   const summaryOf = (path, level, dependents) => '`' + path + '`: ' + level + ' risk, ' + countOf(dependents) + ' dependents';
 
   // The longest a file's line can be without details, with its newline.
-  const shortestOf = (path) => '- '.length + summaryOf(path, 'critical', 100).length + 1;
+  const shortestOf = (path) => '- '.length + summaryOf(path, 'critical', PAGE).length + 1;
 
   const header = 'Constellation: this patch touches files with many dependents.';
   const footer = 'Before changing behavior, run code_intel api.impactAnalysis or api.traceSymbolUsage on the affected symbols.';
@@ -252,7 +281,7 @@ async function impact(api, hook) {
   const found = await Promise.all(claimed.map(dependentsOf));
   const risky = [];
   claimed.forEach((path, i) => {
-    const level = levelOf(found[i].length);
+    const level = found[i] === null ? null : levelOf(found[i].length);
     if (level === 'high' || level === 'critical') risky.push({ path, level, dependents: found[i] });
     else room += shortestOf(path);
   });
@@ -267,10 +296,13 @@ async function impact(api, hook) {
     const top = dependents.slice(0, 3).map((d) => d.filePath);
     const used = [...new Set(dependents.flatMap((d) => d.usedSymbols || []))].slice(0, 10);
     const tests = dependents.filter((d) => isTestFile(d.filePath)).length;
+    let testCount = tests + (tests === 1 ? ' test dependent' : ' test dependents');
+    // On a full page the dependents past it are unseen, so the count is a lower bound.
+    if (dependents.length >= PAGE) testCount = tests + '+ test dependents';
     let line = summary;
     if (top.length > 0) line += ', e.g. ' + top.map((p) => '`' + p + '`').join(', ');
     if (used.length > 0) line += '; used symbols: ' + used.join(', ');
-    line += '; ' + tests + (tests === 1 ? ' test dependent' : ' test dependents');
+    line += '; ' + testCount;
     if (line.length + 1 > room) line = summary;
     lines.push(line);
     room -= line.length + 1;

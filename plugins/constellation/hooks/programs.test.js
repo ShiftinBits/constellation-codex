@@ -155,6 +155,16 @@ for (const command of [
   'ls -la',
   'cat src/user.ts | grep UserService',
   'rg',
+  "cd packages/api && rg '\\bUserService\\b'",
+  'cd packages/api ; rg UserService',
+  'git -C packages/api grep UserService',
+  'rg TODO',
+  'grep -rn FIXME src',
+  'rg MAX_RETRIES',
+  'rg AKIAIOSFODNN7EXAMPLE',
+  'rg import',
+  'grep -rn "export" src',
+  'grep -- -e src',
 ]) {
   test(`augment makes no api call for ${command}`, async () => {
     const { api, calls } = stubApi(() => [userService]);
@@ -170,9 +180,14 @@ for (const [command, symbol] of [
   ['git grep -n "class UserService"', 'UserService'],
   ["grep -rn -e 'createUser\\(' src", 'createUser'],
   ['grep --regexp=createUser src', 'createUser'],
-  ["cd packages/api && rg '\\bUserService\\b'", 'UserService'],
   ['rg UserService src | head -5', 'UserService'],
   ['egrep -rn "def load_config" .', 'load_config'],
+  ['grep -rn --exclude-dir dist UserService .', 'UserService'],
+  ['grep --max-count 5 UserService src', 'UserService'],
+  ['rg --type-not js --max-depth 2 UserService', 'UserService'],
+  ['rg -eUserService src', 'UserService'],
+  ['grep -rn -- UserService src', 'UserService'],
+  ['LC_ALL=C grep -rn UserService .', 'UserService'],
 ]) {
   test(`augment looks up ${symbol} for ${command}`, async () => {
     const { api, calls } = stubApi(() => []);
@@ -198,6 +213,30 @@ test('augment reports the most used exported exact match', async () => {
       '`UserService` (class) defined at `src/user.service.ts:12`, 7 usages. code_intel api.traceSymbolUsage lists every usage.',
   });
   assert.deepStrictEqual(calls, [{ query: 'UserService', limit: 100, includeUsageCount: true, isExported: true }]);
+});
+
+test('augment reports a symbol once per session and still looks up another', async () => {
+  const { api, calls } = stubApi(() => [userService, { ...userService, name: 'parseLine' }]);
+  const { once, keys } = claimingOnce();
+  const search = (command) => run('PostToolUse:Bash', { ...hookFor('PostToolUse:Bash', bashEvent(command)), once }, api);
+  assert.notStrictEqual(await search('rg UserService'), null);
+  assert.strictEqual(await search('grep -rn UserService src'), null);
+  assert.strictEqual(calls.length, 1);
+  assert.notStrictEqual(await search('rg parseLine'), null);
+  assert.deepStrictEqual(keys, ['augment:UserService', 'augment:parseLine']);
+});
+
+test('augment skips a symbol whose once key hook mode would reject', async () => {
+  const { api, calls } = stubApi(() => []);
+  const { once, keys } = claimingOnce();
+  const atLimit = 'a'.repeat(256 - 'augment:'.length);
+  const overLimit = 'b'.repeat(256 - 'augment:'.length + 1);
+  const search = (command) => run('PostToolUse:Bash', { ...hookFor('PostToolUse:Bash', bashEvent(command)), once }, api);
+  assert.strictEqual(await search('rg ' + overLimit), null);
+  assert.strictEqual(calls.length, 0);
+  await search('rg ' + atLimit);
+  assert.deepStrictEqual(keys, ['augment:' + atLimit]);
+  assert.ok(calls.length > 0);
 });
 
 test('augment falls back to a used symbol that is not exported', async () => {
@@ -329,6 +368,34 @@ test('impact reports critical risk and 100+ for a full page', async () => {
   assert.match(result.context, /critical risk, 100\+ dependents/);
 });
 
+test('impact gives the test count of a full page as a lower bound', async () => {
+  const page = [...dependentsList(80), ...Array.from({ length: 20 }, (_, i) => ({ filePath: `test/t${i}.spec.ts` }))];
+  const { api } = dependentsApi(() => page);
+  const patch = '*** Update File: src/core.ts\n';
+  const full = await run(IMPACT, hookFor(IMPACT, patchEvent(patch)), api);
+  assert.match(full.context, /; 20\+ test dependents\n/);
+  const partial = await run(IMPACT, hookFor(IMPACT, patchEvent(patch)), dependentsApi(() => page.slice(1)).api);
+  assert.match(partial.context, /; 20 test dependents\n/);
+});
+
+test('impact reads patch headers that are indented', async () => {
+  const { api, calls } = dependentsApi(() => []);
+  const patch = [
+    '*** Begin Patch',
+    '  *** Update File: src/a.ts',
+    '\t*** Delete File: src/b.ts',
+    ' *** Update File: src/c.ts',
+    '   *** Move to: src/d.ts',
+    '  *** Add File: src/e.ts',
+    '*** End Patch',
+  ].join('\n');
+  await run(IMPACT, hookFor(IMPACT, patchEvent(patch)), api);
+  assert.deepStrictEqual(
+    calls.map((params) => params.filePath),
+    ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts'],
+  );
+});
+
 test('impact summarizes several risky files and keeps the message to one line', async () => {
   const { api } = dependentsApi((params) => (params.filePath === 'src/small.ts' ? dependentsList(2) : dependentsList(25)));
   const patch = '*** Update File: src/a.ts\n*** Update File: src/small.ts\n*** Delete File: src/b.ts\n*** Update File: src/c.ts\n';
@@ -446,12 +513,33 @@ test('impact counts a file that is not in the graph as zero dependents', async (
   assert.match(result.context, /src\/legacy\.ts/);
 });
 
-test('impact rejects on another error even when the path reads not-found', async () => {
-  const { api } = dependentsApi((params) => {
-    throw sandboxError(params, 'Request timed out');
+/** The error MCP's filePath guard throws for an extension the project does not index. */
+function unsupportedLanguage(filePath) {
+  const extension = filePath.slice(filePath.lastIndexOf('.'));
+  const error = new Error(
+    `Unsupported file extension '${extension}' for filePath '${filePath}'. This project is configured to index: .js, .ts.`,
+  );
+  error.name = 'UnsupportedLanguageError';
+  return error;
+}
+
+test('impact skips a file whose lookup fails and still lists the others in a mixed patch', async () => {
+  const { api, calls } = dependentsApi((params) => {
+    if (!/\.ts$/.test(params.filePath)) throw unsupportedLanguage(params.filePath);
+    if (params.filePath === 'src/slow.ts') throw sandboxError(params, 'Request timed out');
+    return dependentsList(30);
   });
-  const patch = '*** Update File: app/not-found.tsx\n';
-  await assert.rejects(run(IMPACT, hookFor(IMPACT, patchEvent(patch)), api), /Request timed out/);
+  const patch = ['README.md', 'src/a.ts', 'package.json', 'src/slow.ts', '.github/workflows/ci.yml', 'scripts/x.mjs', 'src/b.ts']
+    .map((file) => `*** Update File: ${file}`)
+    .join('\n');
+  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch)), api);
+  assert.strictEqual(calls.length, 7);
+  const listed = result.context.split('\n').filter((line) => line.startsWith('- '));
+  assert.deepStrictEqual(
+    listed.map((line) => line.slice(3, line.indexOf('`', 3))),
+    ['src/a.ts', 'src/b.ts'],
+  );
+  assert.strictEqual(result.message, 'src/a.ts: high risk, 30 dependents (+1 more)');
 });
 
 test('impact fetches dependents concurrently and lists files in patch order', async () => {
@@ -493,11 +581,12 @@ test('impact skips a path whose once key hook mode would reject', async () => {
   assert.strictEqual(result.message, `${atLimit}: high risk, 30 dependents (+1 more)`);
 });
 
-test('impact rejects when the api throws, which hook mode turns into a quiet {}', async () => {
-  const { api } = dependentsApi(() => {
+test('impact returns null when every lookup fails', async () => {
+  const { api, calls } = dependentsApi(() => {
     throw new Error('unavailable');
   });
-  await assert.rejects(run(IMPACT, hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json')), api), /unavailable/);
+  assert.strictEqual(await run(IMPACT, hookFor(IMPACT, fixture('pre-tool-use-apply-patch.json')), api), null);
+  assert.strictEqual(calls.length, 4);
 });
 
 test('impact output holds only context and message and no source text', async () => {
