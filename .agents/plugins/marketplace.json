@@ -1,7 +1,7 @@
 {
-	"name": "constellation-local",
+	"name": "constellation",
 	"interface": {
-		"displayName": "Constellation Local Plugins"
+		"displayName": "Constellation Plugins"
 	},
 	"plugins": [
 		{
