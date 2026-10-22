@@ -414,6 +414,14 @@ test('impact reads patch headers that are indented', async () => {
   );
 });
 
+// apply_patch writes a rename over an existing destination without checking for it.
+test('impact reports a rename onto an existing risky file', async () => {
+  const { api } = dependentsApi((params) => (params.filePath === 'src/core/index.ts' ? dependentsList(30) : []));
+  const patch = '*** Update File: src/tmp.ts\n*** Move to: src/core/index.ts\n';
+  const result = await run(IMPACT, hookFor(IMPACT, patchEvent(patch)), api);
+  assert.strictEqual(result.message, 'src/core/index.ts: high risk, 30 dependents');
+});
+
 test('impact summarizes several risky files and keeps the message to one line', async () => {
   const { api } = dependentsApi((params) => (params.filePath === 'src/small.ts' ? dependentsList(2) : dependentsList(25)));
   const patch = '*** Update File: src/a.ts\n*** Update File: src/small.ts\n*** Delete File: src/b.ts\n*** Update File: src/c.ts\n';
