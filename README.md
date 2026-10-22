@@ -98,7 +98,7 @@ Not sure where you are? Run `$constellation:get-started` for guided setup.
 codex plugin marketplace add ShiftinBits/constellation-codex
 
 # Install the Constellation Codex plugin
-codex plugin add constellation@constellation
+codex plugin add constellation@constellation-plugins
 ```
 
 You can also browse and install from the Codex CLI `/plugins` browser or the ChatGPT desktop app Plugins Directory. The Codex IDE extension does not support plugins.
@@ -108,7 +108,7 @@ You can also browse and install from the Codex CLI `/plugins` browser or the Cha
 Optionally let Codex call the Constellation MCP tools without asking each time. Add this to `~/.codex/config.toml`:
 
 ```toml
-[plugins."constellation@constellation".mcp_servers.constellation]
+[plugins."constellation@constellation-plugins".mcp_servers.constellation]
 default_tools_approval_mode = "approve"
 ```
 

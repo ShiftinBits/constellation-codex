@@ -4,7 +4,7 @@ Codex plugin for Constellation code intelligence.
 
 ## Structure
 
-- `.agents/plugins/marketplace.json`: local marketplace (`constellation`).
+- `.agents/plugins/marketplace.json`: local marketplace (`constellation-plugins`).
 - `plugins/constellation/.codex-plugin/plugin.json`: plugin manifest.
 - `plugins/constellation/.mcp.json`: stdio MCP server config.
 - `plugins/constellation/skills/*/SKILL.md`: active `$constellation:*` workflows and skills.

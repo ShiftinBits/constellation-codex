@@ -1,5 +1,5 @@
 {
-	"name": "constellation",
+	"name": "constellation-plugins",
 	"interface": {
 		"displayName": "Constellation Plugins"
 	},
